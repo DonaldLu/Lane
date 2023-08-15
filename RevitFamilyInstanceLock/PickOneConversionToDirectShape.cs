@@ -27,9 +27,9 @@ namespace RevitFamilyInstanceLock
             {
                 resourceManager = new ResourceManager("RevitFamilyInstanceLock.Properties.Message_en-US", Assembly.GetExecutingAssembly());
             }
-            UIApplication expr_43 = commandData.Application;
-            Document document = expr_43.ActiveUIDocument.Document;
-            Selection selection = expr_43.ActiveUIDocument.Selection;
+            UIApplication uiapp = commandData.Application;
+            Document doc = uiapp.ActiveUIDocument.Document;
+            Selection selection = uiapp.ActiveUIDocument.Selection;
             StringBuilder stringBuilder = new StringBuilder();
             HashSet<string> hashSet = new HashSet<string>();
             int num = 0;
@@ -37,8 +37,8 @@ namespace RevitFamilyInstanceLock
             try
             {
                 Reference reference = selection.PickObject(ObjectType.Element, new InsulationSelectionFilter());
-                Element element = document.GetElement(reference);
-                FamilySymbol familySymbol = document.GetElement(element.GetTypeId()) as FamilySymbol;
+                Element element = doc.GetElement(reference);
+                FamilySymbol familySymbol = doc.GetElement(element.GetTypeId()) as FamilySymbol;
                 if (familySymbol == null)
                 {
                     TaskDialog.Show(resourceManager.GetString("pickOne.NoFamily.Title"), resourceManager.GetString("pickOne.NoFamily.Text"));
@@ -46,17 +46,17 @@ namespace RevitFamilyInstanceLock
                 }
                 else
                 {
-                    CommonTools.GetRelatedDim(document, element);
-                    List<Element> allInstancesOfType = CommonTools.GetAllInstancesOfType(familySymbol, document);
+                    CommonTools.GetRelatedDim(doc, element);
+                    List<Element> allInstancesOfType = CommonTools.GetAllInstancesOfType(familySymbol, doc);
                     List<Parameter> typeParameters = CommonTools.GetTypeParameters(familySymbol);
-                    if (!CommonTools.AddParameterToSharedParameter(familySymbol, typeParameters, document))
+                    if (!CommonTools.AddParameterToSharedParameter(familySymbol, typeParameters, doc))
                     {
                         result = Result.Failed;
                     }
                     else
                     {
                         stringBuilder.AppendLine("1.新增共用參數成功");
-                        using (Transaction transaction = new Transaction(document, "Create direct shape"))
+                        using (Transaction transaction = new Transaction(doc, "Create direct shape"))
                         {
                             transaction.Start();
                             foreach (Element current in allInstancesOfType)
@@ -65,17 +65,17 @@ namespace RevitFamilyInstanceLock
                                 List<ElementId> list = element.GetDependentElements(elementClassFilter).ToList<ElementId>();
                                 if (list.Count > 0)
                                 {
-                                    document.GetElement(list[0]);
+                                    doc.GetElement(list[0]);
                                 }
-                                FamilySymbol familySymbol2 = document.GetElement(current.GetTypeId()) as FamilySymbol;
+                                FamilySymbol familySymbol2 = doc.GetElement(current.GetTypeId()) as FamilySymbol;
                                 typeParameters = CommonTools.GetTypeParameters(familySymbol2);
                                 Transform arg_182_0 = Transform.Identity;
                                 if (current is FamilyInstance)
                                 {
                                     (current as FamilyInstance).GetTotalTransform();
                                 }
-                                List<GeometryObject> list2 = CommonTools.GetElementSolids(current, document);
-                                DirectShape directShape = DirectShape.CreateElement(document, current.Category.Id);
+                                List<GeometryObject> list2 = CommonTools.GetElementSolids(current, doc);
+                                DirectShape directShape = DirectShape.CreateElement(doc, current.Category.Id);
                                 directShape.ApplicationId = "鉤逸科技";
                                 directShape.ApplicationDataId = "sugoiitech.com";
                                 if (directShape.IsValidShape(list2) && list2.Count != 0)
@@ -97,9 +97,9 @@ namespace RevitFamilyInstanceLock
                                     }
                                     list2 = list3;
                                     directShape.SetShape(list2);
-                                    hashSet.Add(document.GetElement(current.GetTypeId()).Name);
+                                    hashSet.Add(doc.GetElement(current.GetTypeId()).Name);
                                 }
-                                directShape.Name = document.GetElement(current.GetTypeId()).Name;
+                                directShape.Name = doc.GetElement(current.GetTypeId()).Name;
                                 stringBuilder.AppendLine("2.生成非參數物件成功");
                                 if (!CommonTools.SetPropertyValueFromOriginalElement(directShape, current))
                                 {
@@ -113,21 +113,21 @@ namespace RevitFamilyInstanceLock
                                     return result;
                                 }
                                 stringBuilder.AppendLine("4.修改族群參數成功");
-                                document.Delete(current.Id);
+                                doc.Delete(current.Id);
                                 stringBuilder.AppendLine("5.刪除原始物件成功");
                                 num++;
                             }
-                            document.Delete(familySymbol.Id);
+                            doc.Delete(familySymbol.Id);
                             List<ElementId> list4 = new List<ElementId>();
                             List<int> list5 = new List<int>();
                             list5.Add(14);
                             PerformanceAdviser.GetPerformanceAdviser();
-                            using (IEnumerator<FailureMessage> enumerator3 = PerformanceAdviser.GetPerformanceAdviser().ExecuteRules(document, list5).GetEnumerator())
+                            using (IEnumerator<FailureMessage> enumerator3 = PerformanceAdviser.GetPerformanceAdviser().ExecuteRules(doc, list5).GetEnumerator())
                             {
                                 while (enumerator3.MoveNext())
                                 {
                                     list4 = enumerator3.Current.GetFailingElements().ToList<ElementId>();
-                                    if (document.Delete(list4).Count == 0)
+                                    if (doc.Delete(list4).Count == 0)
                                     {
                                         stringBuilder.AppendLine("6.族群元件尚未移除");
                                     }

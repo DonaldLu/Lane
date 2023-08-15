@@ -4,14 +4,16 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
-using Create = Autodesk.Revit.Creation;
 
 namespace Lane
 {
     [Transaction(TransactionMode.Manual)]
     public class LaneCrush : IExternalCommand
     {
+        private string rfaPath = @"D:\車道干涉\";
+        private string rftPath = @"C:\ProgramData\Autodesk\RVT 2022\Family Templates\Traditional Chinese\公制通用模型.rft";
         public class StartEndPoint
         {
             public XYZ start = new XYZ();
@@ -29,18 +31,8 @@ namespace Lane
             Application app = uiapp.Application;
             Document doc = uidoc.Document;
 
-            List<FamilySymbol> familySymbols = new List<FamilySymbol>();
             FloorType floorType = new FilteredElementCollector(doc).OfClass(typeof(FloorType)).Cast<FloorType>().FirstOrDefault();
-            List<Level> levels = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().ToList();
-            Level level = null;
-            foreach(Level lvl in levels)
-            {
-                if (lvl.Name.Equals("B2FL"))
-                {
-                    level = lvl;
-                    break;
-                }
-            }
+            Level level = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().Where(x => x.Name.Equals("B2FL")).FirstOrDefault();
 
             IList<ElementFilter> elementFilters = new List<ElementFilter>(); // 清空過濾器
             ElementCategoryFilter roomFilter = new ElementCategoryFilter(BuiltInCategory.OST_Floors); // 房間
@@ -49,211 +41,128 @@ namespace Lane
             List<Floor> floors = new FilteredElementCollector(doc).WherePasses(logicalOrFilter).WhereElementIsNotElementType()
                                 .Where(x => x.LookupParameter("樓板高程") != null)
                                 .Where(x => x.LookupParameter("樓板高程").AsValueString().Equals("車道板")).Cast<Floor>().ToList();
-            // 儲存所有車道板的Solid
-            List<Solid> solidList = new List<Solid>();
-            foreach (Floor floor in floors)
+
+            TransactionGroup tranGrp = new TransactionGroup(doc, "路徑篩選");
+            tranGrp.Start();
+
+            int count = DeleteDirectory(rfaPath); // 刪除資料夾檔案
+            using (Transaction trans = new Transaction(doc, "生成干涉模型"))
             {
-                // 1.讀取Geometry Option
-                Options options = new Options();
-                //options.View = doc.GetElement(room.Level.FindAssociatedPlanViewId()) as Autodesk.Revit.DB.View;
-                options.DetailLevel = ViewDetailLevel.Medium;
-                options.ComputeReferences = true;
-                options.IncludeNonVisibleObjects = true;
-                // 得到幾何元素
-                GeometryElement geomElem = floor.get_Geometry(options);
-                List<Solid> solids = GeometrySolids(geomElem);
-                foreach (Solid solid in solids)
+                trans.Start();
+                Document rftDoc = app.OpenDocumentFile(rftPath); // 讀取檔案到內存
+
+                // 取得樓板的頂面輪廓
+                foreach (Floor floor in floors)
                 {
-                    solidList.Add(solid);
-                }
-            }
-            // 將所有Solid聯集
-            Solid unionSolid = UnionSolids(solidList, solidList[0]);
-            List<CurveArray> curvesList = new List<CurveArray>();
-            if (unionSolid != null)
-            {
-                foreach (Face face in unionSolid.Faces)
-                {
-                    PlanarFace pf = face as PlanarFace;
-                    if (pf != null)
+                    List<Solid> solidList = GetRoadwayPlankSolids(floor); // 儲存所有車道板的Solid
+                    List<Face> topFaces = GetTopFaces(solidList); // 回傳Solid的頂面
+                    try
                     {
-                        //if (pf.FaceNormal.IsAlmostEqualTo(XYZ.BasisZ))
-                        //{
-                            EdgeArrayArray loops = pf.EdgeLoops;
-                            foreach (EdgeArray loop in loops)
+                        // 建立擠出樓板
+                        Extrusion rectExtrusion = ExtrusionFloors(rftDoc, topFaces); // 擠出面
+                        // 創建成功的話則儲存族群元件, 並載入到專案中
+                        if (null != rectExtrusion)
+                        {
+                            try
                             {
-                                CurveArray curves = app.Create.NewCurveArray();
-                                foreach (Edge edge in loop)
-                                {
-                                    IList<XYZ> edgePoints = edge.Tessellate();
-                                    Arc arc = null;
-                                    if (edgePoints.Count > 2)
-                                    {
-                                        arc = Arc.Create(edgePoints[0], edgePoints[edgePoints.Count - 1], edgePoints[1]);
-                                        if (arc != null)
-                                        {
-                                            curves.Append(arc);
-                                        }
-                                    }
-                                    else
-                                    {
-                                        Line line = Line.CreateBound(edgePoints[0], edgePoints[1]);
-                                        curves.Append(line);
-                                    }
-                                }
-                                curvesList.Add(curves);
+                                // 儲存干涉元件
+                                rftDoc.SaveAs(rfaPath + "干涉元件" + count + ".rfa");
+                                // 重新載入族群
+                                doc.LoadFamilySymbol(rfaPath + "干涉元件" + count + ".rfa", "干涉元件" + count, new JtFamilyLoadOptions(), out FamilySymbol outFS);
+                                count++;
                             }
-                        //}
+                            catch (Autodesk.Revit.Exceptions.InvalidOperationException)
+                            {
+
+                            }
+                        }
                     }
-                }
-                // 找到Solid所有封閉迴圈邊界的座標點            
-                foreach (CurveArray curves in curvesList)
-                {
-                    StartEndList = new List<StartEndPoint>();
-                    foreach (Curve curve in curves)
+                    catch (Exception)
                     {
-                        string type = curve.GetType().Name;
-                        StartEndPoint startEndPoint = new StartEndPoint();
-                        startEndPoint.type = type;
-
-                        // 將X、Y、Z先轉成double後在存
-
-                        if (type == "Arc")
-                        {
-                            Arc arc = curve as Arc;
-                            double startX = Math.Round(arc.Tessellate()[0].X, 8);
-                            double startY = Math.Round(arc.Tessellate()[0].Y, 8);
-                            double startZ = Math.Round(arc.Tessellate()[0].Z, 8);
-                            double endX = Math.Round(arc.Tessellate()[arc.Tessellate().Count - 1].X, 8);
-                            double endY = Math.Round(arc.Tessellate()[arc.Tessellate().Count - 1].Y, 8);
-                            double endZ = Math.Round(arc.Tessellate()[arc.Tessellate().Count - 1].Z, 8);
-                            double otherX = Math.Round(arc.Tessellate()[1].X, 8);
-                            double otherY = Math.Round(arc.Tessellate()[1].Y, 8);
-                            double otherZ = Math.Round(arc.Tessellate()[1].Z, 8);
-
-                            startEndPoint.start = new XYZ(startX, startY, startZ);
-                            startEndPoint.end = new XYZ(endX, endY, endZ);
-                            startEndPoint.other = new XYZ(otherX, otherY, otherZ);
-                            startEndPoint.perimeter = curve.Length;
-                            StartEndList.Add(startEndPoint);
-                        }
-                        else
-                        {
-                            double startX = Math.Round(curve.Tessellate()[0].X, 8);
-                            double startY = Math.Round(curve.Tessellate()[0].Y, 8);
-                            double startZ = Math.Round(curve.Tessellate()[0].Z, 8);
-                            double endX = Math.Round(curve.Tessellate()[curve.Tessellate().Count - 1].X, 8);
-                            double endY = Math.Round(curve.Tessellate()[curve.Tessellate().Count - 1].Y, 8);
-                            double endZ = Math.Round(curve.Tessellate()[curve.Tessellate().Count - 1].Z, 8);
-
-                            startEndPoint.start = new XYZ(startX, startY, startZ);
-                            startEndPoint.end = new XYZ(endX, endY, endZ);
-                            startEndPoint.perimeter = curve.Length;
-                            StartEndList.Add(startEndPoint);
-                        }
+                        throw new Exception("創建幾何元件失敗.");
                     }
-                    list.Add(StartEndList);
                 }
-
-                // 移除list內最長的周長
-                int removeItem = RemoveLogestPerimeter(list);
-                list.RemoveAt(removeItem);
+                trans.Commit();
             }
+            tranGrp.Assimilate();
 
-            // 新增樓板
-            using (Transaction trans = new Transaction(doc, "建立樓板"))
+            return Result.Succeeded;
+        }
+        // 刪除資料夾檔案
+        private static int DeleteDirectory(string target_dir)
+        {
+            int maxCount = 1; // 紀錄資料夾內火源最大的值
+            List<int> sort = new List<int>();
+            string[] nameSplit = new string[] { };
+            string[] files = Directory.GetFiles(target_dir); // 找到所有檔案
+            string[] dirs = Directory.GetDirectories(target_dir); // 找到所有子資料夾
+            foreach (string file in files)
             {
                 try
                 {
-                    trans.Start();
-                    foreach (List<StartEndPoint> sepList in list)
-                    {
-                        // 排序座標點, 終點接起點
-                        PointSort(sepList);
-                        // 儲存要建樓板的封閉區域
-                        CurveArray curves = SaveCurves(sepList);
-                        List<CurveLoop> curveLoops = new List<CurveLoop>();
-                        CurveLoop curveLoop = new CurveLoop();
-                        foreach (Curve curve in curves)
-                        {
-                            curveLoop.Append(curve);
-                        }
-                        curveLoops.Add(curveLoop);
-                        try
-                        {
-                            // 新增樓板
-                            Floor createFloor = Floor.Create(doc, curveLoops, floorType.Id, level.Id);
-                        }
-                        catch (Exception)
-                        {
-
-                        }
-                    }
-                    trans.Commit();
+                    File.SetAttributes(file, FileAttributes.Normal);
+                    File.Delete(file);
                 }
-                catch (Exception ex)
+                catch (System.IO.IOException)
                 {
-                    TaskDialog.Show("Revit", ex.ToString());
+                    try
+                    {
+                        nameSplit = file.Replace(target_dir + "干涉元件", "").Split('.');
+                        int count = Convert.ToInt32(nameSplit[0]);
+                        sort.Add(count);
+                    }
+                    catch (Exception) // 避免資料夾中有"干涉元件"外的其他檔案名稱
+                    {
+
+                    }
                 }
             }
-            return Result.Succeeded;
-        }
-        private List<List<Curve>> GetBoundarySegment(Floor floor)
-        {
-            List<List<Curve>> boundarySegment = new List<List<Curve>>();
+            foreach (string dir in dirs)
+            {
+                try
+                {
+                    DeleteDirectory(dir);
+                }
+                catch (System.IO.IOException)
+                {
+
+                }
+            }
+            //Directory.Delete(target_dir, false);
             try
             {
-                // 1.讀取Geometry Option
-                Options options = new Options();
-                //options.View = doc.GetElement(room.Level.FindAssociatedPlanViewId()) as Autodesk.Revit.DB.View;
-                options.DetailLevel = ViewDetailLevel.Medium;
-                options.ComputeReferences = true;
-                options.IncludeNonVisibleObjects = true;
-                // 得到幾何元素
-                GeometryElement geomElem = floor.get_Geometry(options);
-                List<Solid> solids = GeometrySolids(geomElem);
-                Solid solid = solids.FirstOrDefault();
-                List<Face> planarFaces = new List<Face>();
-                foreach (Face face in solid.Faces)
-                {
-                    if (face is PlanarFace)
-                    {
-                        PlanarFace planarFace = (PlanarFace)face;
-                        if (planarFace.FaceNormal.Z > 0)
-                        {
-                            planarFaces.Add(planarFace);
-                        }
-                    }
-                }
-                foreach (PlanarFace planarFace in planarFaces)
-                {
-                    foreach (EdgeArray edgeArray in planarFace.EdgeLoops)
-                    {
-                        // 先將所有的邊儲存起來
-                        List<Curve> curveLoop = new List<Curve>();
-                        foreach (Edge edge in edgeArray)
-                        {
-                            Curve curve = edge.AsCurve();
-                            curveLoop.Add(curve);
-                        }
-                        boundarySegment.Add(curveLoop);
-                    }
-                }
-                // 從Solid查詢干涉到的元件, 找到樓梯、電扶梯
-                //foreach (Solid roomSolid in solids)
-                //{
-                //    FindTheIntersectElems(doc, roomSolid, elementInfo);
-                //}
+                maxCount = (from x in sort
+                            select x).Max() + 1;
             }
-            catch (Exception ex)
+            catch (System.InvalidOperationException)
             {
-                string error = ex.Message + "\n" + ex.ToString();
+
+            }
+            return maxCount;
+        }
+        // 儲存所有車道板的Solid
+        private List<Solid> GetRoadwayPlankSolids(Floor floor)
+        {
+            List<Solid> solidList = new List<Solid>();
+
+            // 1.讀取Geometry Option
+            Options options = new Options();
+            //options.View = doc.GetElement(room.Level.FindAssociatedPlanViewId()) as Autodesk.Revit.DB.View;
+            options.DetailLevel = ViewDetailLevel.Medium;
+            options.ComputeReferences = true;
+            options.IncludeNonVisibleObjects = true;
+            // 得到幾何元素
+            GeometryElement geomElem = floor.get_Geometry(options);
+            List<Solid> solids = GeometrySolids(geomElem);
+            foreach (Solid solid in solids)
+            {
+                solidList.Add(solid);
             }
 
-            return boundarySegment;
+            return solidList;
         }
         // 取得車道的Solid
-        private static List<Solid> GeometrySolids(GeometryObject geoObj)
+        private List<Solid> GeometrySolids(GeometryObject geoObj)
         {
             List<Solid> solids = new List<Solid>();
             if (geoObj is Solid)
@@ -283,6 +192,178 @@ namespace Lane
             }
             return solids;
         }
+        // 取得頂面
+        private List<Face> GetTopFaces(List<Solid> solidList)
+        {
+            List<Face> topFaces = new List<Face>();
+            foreach(Solid solid in solidList)
+            {
+                foreach (Face face in solid.Faces)
+                {
+                    PlanarFace pf = face as PlanarFace;
+                    if (pf != null)
+                    {
+                        if(pf.FaceNormal.Z > 0.0)
+                        {
+                            topFaces.Add(face);
+                        }
+                        //double faceTZ = face.ComputeNormal(new UV(0.5, 0.5)).Z;
+                        //if (faceTZ > 0.0)
+                        //{
+                        //    topFaces.Add(face);
+                        //}
+                    }
+                }
+            }
+            return topFaces;
+        }
+        // 擠出面
+        private Extrusion ExtrusionFloors(Document rftDoc, List<Face> topFaces)
+        {
+            Extrusion rectExtrusion = null;
+
+            // 確認開啟族群編輯器
+            if (true == rftDoc.IsFamilyDocument)
+            {
+                // 定義擠出的輪廓線
+                foreach (Face topFace in topFaces)
+                {
+                    using (Transaction rftTrans = new Transaction(rftDoc, "擠出樓板"))
+                    {
+                        rftTrans.Start();
+                        CurveArrArray curveArrArray = new CurveArrArray();
+                        CurveArray curveArray = new CurveArray();
+                        XYZ normal = XYZ.BasisZ;
+                        XYZ origin = new XYZ();
+                        if (topFace is PlanarFace)
+                        {
+                            PlanarFace planarFace = topFace as PlanarFace;
+                            //normal = planarFace.FaceNormal;
+                            origin = planarFace.Origin;
+                        }
+                        else if (topFace is CylindricalFace)
+                        {
+                            CylindricalFace cylindricalFace = topFace as CylindricalFace;
+                            //normal = cylindricalFace.Axis;
+                            origin = cylindricalFace.Origin;
+                        }
+                        //建立一個草繪平面
+                        SketchPlane sketchPlane = CreateSketchPlane(rftDoc, normal, origin);
+                        //sketchPlane = SketchPlane.Create(doc, topFace.Reference);
+                        List<StartEndPoint> startEndPointList = new List<StartEndPoint>();
+                        foreach (EdgeArray edgeArray in topFace.EdgeLoops)
+                        {
+                            foreach (Edge edge in edgeArray)
+                            {
+                                XYZ startPoint = new XYZ(edge.Tessellate()[0].X, edge.Tessellate()[0].Y, 0);
+                                XYZ endPoint = new XYZ(edge.Tessellate()[1].X, edge.Tessellate()[1].Y, 0);
+                                StartEndPoint startEndPoint = new StartEndPoint();
+                                startEndPoint.start = startPoint;
+                                startEndPoint.end = endPoint;
+                                startEndPointList.Add(startEndPoint);
+                            }
+                        }
+                        PointSort(startEndPointList); // 排序座標點, 終點接起點
+                        foreach (StartEndPoint startEndPoint in startEndPointList)
+                        {
+                            XYZ startPoint = new XYZ(startEndPoint.start.X, startEndPoint.start.Y, startEndPoint.start.Z);
+                            XYZ endPoint = new XYZ(startEndPoint.end.X, startEndPoint.end.Y, startEndPoint.end.Z);
+                            Line line = Line.CreateBound(startPoint, endPoint);
+                            curveArray.Append(line);
+                        }
+                        curveArrArray.Append(curveArray);
+
+                        try
+                        {
+                            rectExtrusion = rftDoc.FamilyCreate.NewExtrusion(true, curveArrArray, sketchPlane, 10); // 創建矩形的擠出元件
+                        }
+                        catch(Exception)
+                        {
+
+                        }
+
+                        rftTrans.Commit();
+                    }
+                }
+            }
+            else
+            {
+                throw new Exception("請開啟族群編輯器.");
+            }
+
+            return rectExtrusion;
+        }
+        // 草繪平面
+        private static SketchPlane CreateSketchPlane(Document rftDoc, XYZ normal, XYZ origin)
+        {
+            Plane geometryPlane = Plane.CreateByNormalAndOrigin(normal, origin); // 草繪平面
+            if (null == geometryPlane)
+            {
+                throw new Exception("創建幾何平面失敗.");
+            }
+            SketchPlane plane = SketchPlane.Create(rftDoc, geometryPlane); // 草繪平面
+            if (null == plane)
+            {
+                throw new Exception("創建幾何平面失敗.");
+            }
+            return plane;
+        }
+        // 排序座標點, 終點接起點
+        private void PointSort(List<StartEndPoint> sepList)
+        {
+            XYZ newStart = new XYZ();
+            XYZ newEnd = new XYZ();
+
+            if (Math.Round(sepList[0].start.X, 4, MidpointRounding.AwayFromZero) == Math.Round(sepList[1].start.X, 4, MidpointRounding.AwayFromZero) &&
+                Math.Round(sepList[0].start.Y, 4, MidpointRounding.AwayFromZero) == Math.Round(sepList[1].start.Y, 4, MidpointRounding.AwayFromZero) &&
+                Math.Round(sepList[0].start.Z, 4, MidpointRounding.AwayFromZero) == Math.Round(sepList[1].start.Z, 4, MidpointRounding.AwayFromZero))
+            {
+                newStart = sepList[0].end;
+                newEnd = sepList[0].start;
+                sepList[0].start = newStart;
+                sepList[0].end = newEnd;
+            }
+            else if (Math.Round(sepList[0].start.X, 4, MidpointRounding.AwayFromZero) == Math.Round(sepList[1].end.X, 4, MidpointRounding.AwayFromZero) &&
+                     Math.Round(sepList[0].start.Y, 4, MidpointRounding.AwayFromZero) == Math.Round(sepList[1].end.Y, 4, MidpointRounding.AwayFromZero) &&
+                     Math.Round(sepList[0].start.Z, 4, MidpointRounding.AwayFromZero) == Math.Round(sepList[1].end.Z, 4, MidpointRounding.AwayFromZero))
+            {
+                newStart = sepList[0].end;
+                newEnd = sepList[0].start;
+                sepList[0].start = newStart;
+                sepList[0].end = newEnd;
+            }
+
+            for (int i = 1; i < sepList.Count; i++)
+            {
+                newStart = new XYZ();
+                newEnd = new XYZ();
+
+                if (Math.Round(sepList[i].end.X, 4, MidpointRounding.AwayFromZero) == Math.Round(sepList[i - 1].end.X, 4, MidpointRounding.AwayFromZero) &&
+                    Math.Round(sepList[i].end.Y, 4, MidpointRounding.AwayFromZero) == Math.Round(sepList[i - 1].end.Y, 4, MidpointRounding.AwayFromZero) &&
+                    Math.Round(sepList[i].end.Z, 4, MidpointRounding.AwayFromZero) == Math.Round(sepList[i - 1].end.Z, 4, MidpointRounding.AwayFromZero))
+                {
+                    newStart = sepList[i].end;
+                    newEnd = sepList[i].start;
+                    sepList[i].start = newStart;
+                    sepList[i].end = newEnd;
+                }
+            }
+        }
+        // 重新載入FamilySymbol
+        private class JtFamilyLoadOptions : IFamilyLoadOptions
+        {
+            public bool OnFamilyFound(bool familyInUse, out bool overwriteParameterValues)
+            {
+                overwriteParameterValues = true;
+                return true;
+            }
+            public bool OnSharedFamilyFound(Family sharedFamily, bool familyInUse, out FamilySource source, out bool overwriteParameterValues)
+            {
+                source = FamilySource.Family;
+                overwriteParameterValues = true;
+                return true;
+            }
+        }
         // 將所有Solid聯集
         private Solid UnionSolids(IList<Solid> solids, Solid hostSolid)
         {
@@ -304,88 +385,6 @@ namespace Lane
             }
 
             return hostSolid;
-        }
-        // 移除周長最長的sepList
-        private int RemoveLogestPerimeter(List<List<StartEndPoint>> list)
-        {
-            double longest = 0.0;
-            int count = 0;
-            int removeItem = 0;
-            foreach (List<StartEndPoint> sepList in list)
-            {
-                double perimeter = 0.0;
-                foreach (StartEndPoint item in sepList)
-                {
-                    perimeter += item.perimeter;
-                }
-                if (perimeter > longest)
-                {
-                    longest = perimeter;
-                    removeItem = count;
-                }
-                count++;
-            }
-            return removeItem;
-        }
-        // 排序座標點, 終點接起點
-        private void PointSort(List<StartEndPoint> sepList)
-        {
-            XYZ newStart = new XYZ();
-            XYZ newEnd = new XYZ();
-
-            if (sepList[0].start.X.ToString() == sepList[1].start.X.ToString() &&
-               sepList[0].start.Y.ToString() == sepList[1].start.Y.ToString() &&
-               sepList[0].start.Z.ToString() == sepList[1].start.Z.ToString())
-            {
-                newStart = sepList[0].end;
-                newEnd = sepList[0].start;
-                sepList[0].start = newStart;
-                sepList[0].end = newEnd;
-            }
-            else if (sepList[0].start.X.ToString() == sepList[1].end.X.ToString() &&
-                    sepList[0].start.Y.ToString() == sepList[1].end.Y.ToString() &&
-                    sepList[0].start.Z.ToString() == sepList[1].end.Z.ToString())
-            {
-                newStart = sepList[0].end;
-                newEnd = sepList[0].start;
-                sepList[0].start = newStart;
-                sepList[0].end = newEnd;
-            }
-
-            for (int i = 1; i < sepList.Count; i++)
-            {
-                newStart = new XYZ();
-                newEnd = new XYZ();
-
-                if (sepList[i].end.X.ToString() == sepList[i - 1].end.X.ToString() &&
-                    sepList[i].end.Y.ToString() == sepList[i - 1].end.Y.ToString() &&
-                    sepList[i].end.Z.ToString() == sepList[i - 1].end.Z.ToString())
-                {
-                    newStart = sepList[i].end;
-                    newEnd = sepList[i].start;
-                    sepList[i].start = newStart;
-                    sepList[i].end = newEnd;
-                }
-            }
-        }
-        // 儲存要建樓板的封閉區域
-        private CurveArray SaveCurves(List<StartEndPoint> sepList)
-        {
-            CurveArray curves = new CurveArray();
-            foreach (StartEndPoint edge in sepList)
-            {
-                if (edge.type == "Arc")
-                {
-                    Arc arc = Arc.Create(edge.start, edge.end, edge.other);
-                    curves.Append(arc);
-                }
-                else
-                {
-                    Line line = Line.CreateBound(edge.start, edge.end);
-                    curves.Append(line);
-                }
-            }
-            return curves;
         }
     }
 }
