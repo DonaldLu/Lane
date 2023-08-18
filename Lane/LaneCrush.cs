@@ -18,7 +18,10 @@ namespace Lane
         {
             public XYZ start = new XYZ();
             public XYZ end = new XYZ();
+            public List<XYZ> xyzs = new List<XYZ>();
             public XYZ other = new XYZ();
+            public bool isPeriodic = false;
+            public List<XYZ> tangents = new List<XYZ>();
             public Double perimeter = 0.0;
             public string type = string.Empty;
         }
@@ -59,23 +62,24 @@ namespace Lane
                     try
                     {
                         // 建立擠出樓板
-                        Extrusion rectExtrusion = ExtrusionFloors(rftDoc, topFaces); // 擠出面
-                        // 創建成功的話則儲存族群元件, 並載入到專案中
-                        if (null != rectExtrusion)
-                        {
-                            try
-                            {
-                                // 儲存干涉元件
-                                rftDoc.SaveAs(rfaPath + "干涉元件" + count + ".rfa");
-                                // 重新載入族群
-                                doc.LoadFamilySymbol(rfaPath + "干涉元件" + count + ".rfa", "干涉元件" + count, new JtFamilyLoadOptions(), out FamilySymbol outFS);
-                                count++;
-                            }
-                            catch (Autodesk.Revit.Exceptions.InvalidOperationException)
-                            {
+                        CreateCubicDirectShape(doc, topFaces);
+                        //Extrusion rectExtrusion = ExtrusionFloors(rftDoc, topFaces); // 擠出面
+                        //// 創建成功的話則儲存族群元件, 並載入到專案中
+                        //if (null != rectExtrusion)
+                        //{
+                        //    try
+                        //    {
+                        //        // 儲存干涉元件
+                        //        rftDoc.SaveAs(rfaPath + "干涉元件" + count + ".rfa");
+                        //        // 重新載入族群
+                        //        doc.LoadFamilySymbol(rfaPath + "干涉元件" + count + ".rfa", "干涉元件" + count, new JtFamilyLoadOptions(), out FamilySymbol outFS);
+                        //        count++;
+                        //    }
+                        //    catch (Autodesk.Revit.Exceptions.InvalidOperationException)
+                        //    {
 
-                            }
-                        }
+                        //    }
+                        //}
                     }
                     catch (Exception)
                     {
@@ -200,22 +204,112 @@ namespace Lane
             {
                 foreach (Face face in solid.Faces)
                 {
-                    PlanarFace pf = face as PlanarFace;
-                    if (pf != null)
+                    if(face is PlanarFace)
                     {
-                        if(pf.FaceNormal.Z > 0.0)
+                        PlanarFace planarFace = face as PlanarFace;
+                        if (planarFace != null)
+                        {
+                            //double faceTZ = face.ComputeNormal(new UV(0.5, 0.5)).Z;
+                            //if (faceTZ > 0.0)
+                            if (planarFace.FaceNormal.Z > 0.0)
+                            {
+                                //topFaces.Add(face);
+                            }
+                        }
+                    }
+                    else if(face is RuledFace)
+                    {
+                        RuledFace ruledFace = face as RuledFace;
+                        if(ruledFace != null)
                         {
                             topFaces.Add(face);
                         }
-                        //double faceTZ = face.ComputeNormal(new UV(0.5, 0.5)).Z;
-                        //if (faceTZ > 0.0)
-                        //{
-                        //    topFaces.Add(face);
-                        //}
                     }
                 }
             }
             return topFaces;
+        }
+        // 擠出面
+        public void CreateCubicDirectShape(Document doc, List<Face> topFaces)
+        {
+            foreach (Face topFace in topFaces)
+            {
+                List<StartEndPoint> startEndPointList = new List<StartEndPoint>();
+                List<Curve> profile = new List<Curve>();
+                foreach (EdgeArray edgeArray in topFace.EdgeLoops)
+                {
+                    foreach (Edge edge in edgeArray)
+                    {
+                        if (edge.AsCurve() is Line)
+                        {
+                            XYZ startPoint = new XYZ(edge.Tessellate()[0].X, edge.Tessellate()[0].Y, edge.Tessellate()[0].Z);
+                            XYZ endPoint = new XYZ(edge.Tessellate()[edge.Tessellate().Count - 1].X, edge.Tessellate()[edge.Tessellate().Count - 1].Y, edge.Tessellate()[edge.Tessellate().Count - 1].Z);
+                            StartEndPoint startEndPoint = new StartEndPoint();
+                            startEndPoint.start = startPoint;
+                            startEndPoint.end = endPoint;
+                            startEndPoint.type = "Line";
+                            startEndPointList.Add(startEndPoint);
+                        }
+                        else if (edge.AsCurve() is HermiteSpline)
+                        {
+                            HermiteSpline hermiteSpline = edge.AsCurve() as HermiteSpline;
+                            XYZ startPoint = new XYZ(edge.Tessellate()[0].X, edge.Tessellate()[0].Y, edge.Tessellate()[0].Z);
+                            XYZ endPoint = new XYZ(edge.Tessellate()[edge.Tessellate().Count - 1].X, edge.Tessellate()[edge.Tessellate().Count - 1].Y, edge.Tessellate()[edge.Tessellate().Count - 1].Z);
+                            StartEndPoint startEndPoint = new StartEndPoint();
+                            startEndPoint.start = startPoint;
+                            startEndPoint.end = endPoint;
+                            // 儲存中間的座標點
+                            for(int i = 1; i < edge.Tessellate().Count - 1; i++)
+                            {
+                                startEndPoint.xyzs.Add(edge.Tessellate()[i]);
+                            }
+                            startEndPoint.type = "HermiteSpline";
+                            startEndPoint.isPeriodic = hermiteSpline.IsPeriodic;
+                            startEndPoint.tangents = hermiteSpline.Tangents.ToList();
+                            startEndPointList.Add(startEndPoint);
+                        }
+                    }
+                }
+                PointSort(startEndPointList); // 排序座標點, 終點接起點
+                foreach (StartEndPoint startEndPoint in startEndPointList)
+                {
+                    XYZ startPoint = new XYZ(startEndPoint.start.X, startEndPoint.start.Y, startEndPoint.start.Z);
+                    XYZ endPoint = new XYZ(startEndPoint.end.X, startEndPoint.end.Y, startEndPoint.end.Z);
+                    if (startEndPoint.type.Equals("Line"))
+                    {
+                        Line line = Line.CreateBound(startPoint, endPoint);
+                        profile.Add(line);
+                    }
+                    else if (startEndPoint.type.Equals("HermiteSpline"))
+                    {
+                        startEndPoint.xyzs.Insert(0, startPoint);
+                        startEndPoint.xyzs.Insert(startEndPoint.xyzs.Count, endPoint);
+                        HermiteSpline hermiteSpline = HermiteSpline.Create(startEndPoint.xyzs, startEndPoint.isPeriodic);
+                        profile.Add(hermiteSpline);
+                        //for (int i = 0; i < startEndPoint.xyzs.Count - 1; i++)
+                        //{
+                        //    Line line = Line.CreateBound(startEndPoint.xyzs[i], startEndPoint.xyzs[i + 1]);
+                        //    profile.Add(line);
+                        //}
+                    }
+                }
+                try
+                {
+                    CurveLoop curveLoop = new CurveLoop();
+                    curveLoop = CurveLoop.Create(profile);
+                    SolidOptions options = new SolidOptions(ElementId.InvalidElementId, ElementId.InvalidElementId);
+                    double height = UnitUtils.ConvertToInternalUnits(210, UnitTypeId.Centimeters);
+                    Solid cubic = GeometryCreationUtilities.CreateExtrusionGeometry(new CurveLoop[] { curveLoop }, XYZ.BasisZ, height);
+                    DirectShape ds = DirectShape.CreateElement(doc, new ElementId(BuiltInCategory.OST_GenericModel));
+                    ds.ApplicationId = "Application id";
+                    ds.ApplicationDataId = "Geometry object id";
+                    ds.SetShape(new GeometryObject[] { cubic });
+                }
+                catch (Exception ex)
+                {
+                    string error = ex.Message + "\n" + ex.ToString();
+                }
+            }
         }
         // 擠出面
         private Extrusion ExtrusionFloors(Document rftDoc, List<Face> topFaces)
@@ -322,6 +416,10 @@ namespace Lane
                 newEnd = sepList[0].start;
                 sepList[0].start = newStart;
                 sepList[0].end = newEnd;
+                if (sepList[0].type.Equals("HermiteSpline"))
+                {
+                    sepList[0].xyzs.Reverse();
+                }
             }
             else if (Math.Round(sepList[0].start.X, 4, MidpointRounding.AwayFromZero) == Math.Round(sepList[1].end.X, 4, MidpointRounding.AwayFromZero) &&
                      Math.Round(sepList[0].start.Y, 4, MidpointRounding.AwayFromZero) == Math.Round(sepList[1].end.Y, 4, MidpointRounding.AwayFromZero) &&
@@ -331,6 +429,18 @@ namespace Lane
                 newEnd = sepList[0].start;
                 sepList[0].start = newStart;
                 sepList[0].end = newEnd;
+                if (sepList[0].type.Equals("HermiteSpline"))
+                {
+                    sepList[0].xyzs.Reverse();
+                }
+                newStart = sepList[1].end;
+                newEnd = sepList[1].start;
+                sepList[1].start = newStart;
+                sepList[1].end = newEnd;
+                if (sepList[1].type.Equals("HermiteSpline"))
+                {
+                    sepList[1].xyzs.Reverse();
+                }
             }
 
             for (int i = 1; i < sepList.Count; i++)
@@ -346,6 +456,10 @@ namespace Lane
                     newEnd = sepList[i].start;
                     sepList[i].start = newStart;
                     sepList[i].end = newEnd;
+                    if(sepList[i].type.Equals("HermiteSpline"))
+                    {
+                        sepList[i].xyzs.Reverse();
+                    }
                 }
             }
         }
