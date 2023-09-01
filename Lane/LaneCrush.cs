@@ -1,11 +1,14 @@
 ﻿using Autodesk.Revit.ApplicationServices;
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
+using Autodesk.Revit.DB.Visual;
 using Autodesk.Revit.UI;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Windows.Media.Media3D;
+using Material = Autodesk.Revit.DB.Material;
 
 namespace Lane
 {
@@ -37,32 +40,121 @@ namespace Lane
             List<Floor> floors = new FilteredElementCollector(doc).WherePasses(logicalOrFilter).WhereElementIsNotElementType()
                                 .Where(x => x.LookupParameter("樓板高程") != null)
                                 .Where(x => x.LookupParameter("樓板高程").AsValueString().Equals("車道板")).Cast<Floor>().ToList();
-
-            TransactionGroup tranGrp = new TransactionGroup(doc, "路徑篩選");
-            tranGrp.Start();
-            using (Transaction trans = new Transaction(doc, "生成干涉模型"))
+            foreach(Floor floor in floors)
             {
-                trans.Start();
-                // 取得樓板的頂面輪廓
-                foreach (Floor floor in floors)
+                List<GeometryObject> list = GetElementSolids(floor, doc);
+                DirectShape directShape = DirectShape.CreateElement(doc, floor.Category.Id);
+                directShape.ApplicationId = "Test";
+                directShape.ApplicationDataId = "Test.com";
+                if (directShape.IsValidShape(list) && list.Count != 0)
                 {
-                    List<Solid> solidList = GetRoadwayPlankSolids(floor); // 儲存所有車道板的Solid
-                    List<Face> topFaces = GetTopFaces(solidList); // 回傳Solid的頂面
-                    try
-                    {
-                        // 建立擠出樓板
-                        CreateCubicDirectShape(doc, topFaces);
-                    }
-                    catch (Exception)
-                    {
-                        throw new Exception("創建幾何元件失敗.");
-                    }
+                    directShape.SetShape(list);
                 }
-                trans.Commit();
+                else
+                {
+                    List<GeometryObject> list2 = new List<GeometryObject>();
+                    foreach (GeometryObject current3 in list)
+                    {
+                        if (directShape.IsValidShape(new List<GeometryObject>
+                                    {
+                                        current3
+                                    }))
+                        {
+                            list2.Add(current3);
+                        }
+                    }
+                    list = list2;
+                    directShape.SetShape(list);
+                }
+
+                //// 取得樓板的頂面輪廓
+                //List<Solid> solidList = GetRoadwayPlankSolids(floor); // 儲存所有車道板的Solid
+                //List<Face> topFaces = GetTopFaces(solidList); // 回傳Solid的頂面
+                //try
+                //{
+                //    ElementId materialId = floor.FloorType.StructuralMaterialId;
+                //    CreateTessellatedShape(doc, materialId, topFaces);
+                //}
+                //catch (Exception)
+                //{
+                //    throw new Exception("創建幾何元件失敗.");
+                //}
             }
-            tranGrp.Assimilate();
+
+            //TransactionGroup tranGrp = new TransactionGroup(doc, "路徑篩選");
+            //tranGrp.Start();
+            //using (Transaction trans = new Transaction(doc, "生成干涉模型"))
+            //{
+            //    trans.Start();
+            //    // 取得樓板的頂面輪廓
+            //    foreach (Floor floor in floors)
+            //    {
+            //        List<Solid> solidList = GetRoadwayPlankSolids(floor); // 儲存所有車道板的Solid
+            //        List<Face> topFaces = GetTopFaces(solidList); // 回傳Solid的頂面
+            //        try
+            //        {
+            //            // 建立擠出樓板
+            //            CreateCubicDirectShape(doc, topFaces);
+            //        }
+            //        catch (Exception)
+            //        {
+            //            throw new Exception("創建幾何元件失敗.");
+            //        }
+            //    }
+            //    trans.Commit();
+            //}
+            //tranGrp.Assimilate();
 
             return Result.Succeeded;
+        }
+
+        public static List<GeometryObject> GetElementSolids(Floor floor, Document doc)
+        {
+            List<GeometryObject> list = new List<GeometryObject>();
+            Options options = new Options();
+            options.ComputeReferences = true;
+            options.DetailLevel = ((doc.ActiveView != null) ? doc.ActiveView.DetailLevel : ViewDetailLevel.Medium);
+            list = GetSolidsAndCurves(floor, list, options);
+            return list;
+        }
+
+        public static List<GeometryObject> GetSolidsAndCurves(Floor floor, List<GeometryObject> resultList, Options geoOpt)
+        {
+            using (IEnumerator<GeometryObject> enumerator = floor.get_Geometry(geoOpt).GetEnumerator())
+            {
+                while (enumerator.MoveNext())
+                {
+                    GeometryInstance geometryInstance = enumerator.Current as GeometryInstance;
+                    if (null != geometryInstance)
+                    {
+                        Transform transform = geometryInstance.Transform;
+                        foreach (GeometryObject geometryObject in geometryInstance.GetSymbolGeometry())
+                        {
+                            Solid solid = geometryObject as Solid;
+                            Curve curve = geometryObject as Curve;
+                            if (solid != null && solid.Volume != 0.0 && solid.SurfaceArea != 0.0)
+                            {
+                                resultList.Add(SolidUtils.CreateTransformed(solid, transform));
+                            }
+                            if (curve != null)
+                            {
+                                Curve item = NurbSpline.CreateCurve(HermiteSpline.Create(curve.Tessellate(), false)).CreateTransformed(transform);
+                                resultList.Add(item);
+                            }
+                        }
+                    }
+                    if(enumerator.Current is Solid)
+                    {
+                        Transform transform = geometryInstance.Transform;
+                        Solid solid = enumerator.Current as Solid;
+                        if (solid != null && solid.Volume != 0.0 && solid.SurfaceArea != 0.0)
+                        {
+                            resultList.Add(SolidUtils.CreateTransformed(solid, transform));
+                        }
+                    }
+                }
+            }
+            return resultList;
         }
         // 儲存所有車道板的Solid
         private List<Solid> GetRoadwayPlankSolids(Floor floor)
@@ -129,27 +221,173 @@ namespace Lane
                         PlanarFace planarFace = face as PlanarFace;
                         if (planarFace != null)
                         {
-                            if (planarFace.FaceNormal.Z > 0.0)
-                            {
+                            //if (planarFace.FaceNormal.Z > 0.0)
+                            //{
                                 topFaces.Add(face);
-                            }
+                            //}
                         }
                     }
-                    else if(face is RuledFace)
-                    {
-                        RuledFace ruledFace = face as RuledFace;
-                        if(ruledFace != null)
-                        {
-                            double faceTZ = face.ComputeNormal(new UV(0.5, 0.5)).Z;
-                            if (faceTZ > 0.0)
-                            {
-                                topFaces.Add(face);
-                            }
-                        }
-                    }
+                    //else if (face is CylindricalFace)
+                    //{
+                    //    CylindricalFace cylindricalFace = face as CylindricalFace;
+                    //    if (cylindricalFace != null)
+                    //    {
+                    //        double faceTZ = face.ComputeNormal(new UV(0.5, 0.5)).Z;
+                    //        if (cylindricalFace.Axis.Z > 0.0)
+                    //        {
+                    //            topFaces.Add(face);
+                    //        }
+                    //    }
+                    //}
+                    //else if(face is RuledFace)
+                    //{
+                    //    RuledFace ruledFace = face as RuledFace;
+                    //    if(ruledFace != null)
+                    //    {
+                    //        //double faceTZ = face.ComputeNormal(new UV(0.5, 0.5)).Z;
+                    //        //if (faceTZ > 0.0)
+                    //        //{
+                    //            topFaces.Add(face);
+                    //        //}
+                    //    }
+                    //}
                 }
             }
             return topFaces;
+        }
+        // 使用TessellatedShapeBuilder建立面
+        // Create a pyramid-shaped DirectShape using given material for the faces
+        private void CreateTessellatedShape(Document doc, ElementId materialId, List<Face> topFaces)
+        {
+            List<XYZ> loopVertices = new List<XYZ>(4);
+
+            TessellatedShapeBuilder builder = new TessellatedShapeBuilder();
+
+            builder.OpenConnectedFaceSet(true);
+            double length = 4.0; 
+            double height = UnitUtils.ConvertToInternalUnits(210, UnitTypeId.Centimeters);
+
+            foreach (Face topFace in topFaces)
+            {
+                loopVertices.Clear();
+                if (topFace is PlanarFace)
+                {
+                    List<StartEndPoint> startEndPointList = new List<StartEndPoint>();
+                    EdgeArrayArray edgeArrayArray = topFace.EdgeLoops;
+                    foreach (EdgeArray edgeArray in edgeArrayArray)
+                    {
+                        foreach (Edge edge in edgeArray)
+                        {
+                            XYZ startPoint = new XYZ(edge.Tessellate()[0].X, edge.Tessellate()[0].Y, edge.Tessellate()[0].Z + height);
+                            XYZ endPoint = new XYZ(edge.Tessellate()[edge.Tessellate().Count - 1].X, edge.Tessellate()[edge.Tessellate().Count - 1].Y, edge.Tessellate()[edge.Tessellate().Count - 1].Z + height);
+                            StartEndPoint startEndPoint = new StartEndPoint();
+                            startEndPoint.start = startPoint;
+                            startEndPoint.end = endPoint;
+                            startEndPoint.type = "Line";
+                            startEndPointList.Add(startEndPoint);
+                            //foreach (XYZ xyz in edge.Tessellate())
+                            //{
+
+                            //    //XYZ romoveXYZ = new XYZ(xyz.X, xyz.Y, xyz.Z + height);
+                            //    //// 重複的座標點則不儲存
+                            //    //XYZ test = loopVertices.Where(x => Math.Round(x.X, 8, MidpointRounding.AwayFromZero).Equals(Math.Round(romoveXYZ.X, 8, MidpointRounding.AwayFromZero)) && 
+                            //    //                                   Math.Round(x.Y, 8, MidpointRounding.AwayFromZero).Equals(Math.Round(romoveXYZ.Y, 8, MidpointRounding.AwayFromZero)) &&
+                            //    //                                   Math.Round(x.Z, 8, MidpointRounding.AwayFromZero).Equals(Math.Round(romoveXYZ.Z, 8, MidpointRounding.AwayFromZero))).FirstOrDefault();
+                            //    //if (test == null)
+                            //    //{
+                            //    //    loopVertices.Add(romoveXYZ);
+                            //    //}
+                            //}
+                        }
+                        PointSort(startEndPointList); // 排序座標點, 終點接起點
+                        foreach (StartEndPoint startEndPoint in startEndPointList)
+                        {
+                            XYZ startPoint = new XYZ(startEndPoint.start.X, startEndPoint.start.Y, startEndPoint.start.Z);
+                            loopVertices.Add(startPoint);
+                        }
+                        builder.AddFace(new TessellatedFace(loopVertices, materialId));
+                    }
+                }
+                //else if (topFace is RuledFace)
+                //{
+                //    EdgeArrayArray edgeArrayArray = topFace.EdgeLoops;
+                //    foreach(EdgeArray edgeArray in edgeArrayArray)
+                //    {
+                //        foreach(Edge edge in edgeArray)
+                //        {
+                //            foreach(XYZ xyz in edge.Tessellate())
+                //            {
+                //                XYZ romoveXYZ = new XYZ(xyz.X, xyz.Y, xyz.Z + height);
+                //                loopVertices.Add(xyz);
+                //            }
+                //            //if (edge.AsCurve() is HermiteSpline)
+                //            //{
+
+                //            //}
+                //            //else if (edge.AsCurve() is Line)
+                //            //{
+
+                //            //}
+                //        }
+                //        builder.AddFace(new TessellatedFace(loopVertices, materialId));
+                //    }
+                //}
+            }
+
+            //XYZ basePt1 = XYZ.Zero;
+            //XYZ basePt2 = new XYZ(length, 0, 0);
+            //XYZ basePt3 = new XYZ(length, length, 0);
+            //XYZ basePt4 = new XYZ(0, length, 0);
+            //XYZ apex = new XYZ(length / 2, length / 2, height);
+
+            //loopVertices.Add(basePt1);
+            //loopVertices.Add(basePt2);
+            //loopVertices.Add(basePt3);
+            //loopVertices.Add(basePt4);
+            //builder.AddFace(new TessellatedFace(loopVertices, materialId));
+
+            //loopVertices.Clear();
+            //loopVertices.Add(basePt1);
+            //loopVertices.Add(apex);
+            //loopVertices.Add(basePt2);
+            //builder.AddFace(new TessellatedFace(loopVertices, materialId));
+
+            //loopVertices.Clear();
+            //loopVertices.Add(basePt2);
+            //loopVertices.Add(apex);
+            //loopVertices.Add(basePt3);
+            //builder.AddFace(new TessellatedFace(loopVertices, materialId));
+
+            //loopVertices.Clear();
+            //loopVertices.Add(basePt3);
+            //loopVertices.Add(apex);
+            //loopVertices.Add(basePt4);
+            //builder.AddFace(new TessellatedFace(loopVertices, materialId));
+
+            //loopVertices.Clear();
+            //loopVertices.Add(basePt4);
+            //loopVertices.Add(apex);
+            //loopVertices.Add(basePt1);
+            //builder.AddFace(new TessellatedFace(loopVertices, materialId));
+
+            builder.CloseConnectedFaceSet();
+            builder.Target = TessellatedShapeBuilderTarget.Solid;
+            builder.Fallback = TessellatedShapeBuilderFallback.Abort;
+            builder.Build();
+
+            TessellatedShapeBuilderResult result = builder.GetBuildResult();
+
+            using (Transaction t = new Transaction(doc, "Create tessellated direct shape"))
+            {
+                t.Start();
+
+                DirectShape ds = DirectShape.CreateElement(doc, new ElementId(BuiltInCategory.OST_GenericModel));
+                ds.ApplicationId = "Application id";
+                ds.ApplicationDataId = "Geometry object id";
+
+                ds.SetShape(result.GetGeometricalObjects());
+                t.Commit();
+            }
         }
         // 擠出面
         public void CreateCubicDirectShape(Document doc, List<Face> topFaces)
