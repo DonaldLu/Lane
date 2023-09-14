@@ -46,21 +46,26 @@ namespace Lane
                 {
                     List<Solid> solidList = GetRoadwayPlankSolids(doc, floor); // 儲存所有車道板的Solid
                     List<Face> topFaces = GetTopFaces(solidList); // 回傳Solid的頂面
-                    foreach(Face topFace in topFaces)
+                    Face topFace = topFaces.FirstOrDefault();
+                    //foreach (Face topFace in topFaces)
+                    //{
+                    try
                     {
-                        try
-                        {
-                            List<GeometryObject> resultList = SaveFaceCurveLoop(topFace); // 儲存所有Face的封閉曲線
-                            DirectShape directShape = DirectShape.CreateElement(doc, floor.Category.Id);
-                            directShape.ApplicationId = "road";
-                            directShape.ApplicationDataId = "road.com";
-                            directShape.SetShape(resultList);
-                        }
-                        catch (Exception ex)
-                        {
-                            string msg = ex.Message + "\n" + ex.ToString();
-                        }
+                        List<Curve> curveLoop = SaveFaceCurveLoop(topFace); // 儲存所有Face的封閉曲線
+                        //List<GeometryObject> curveLoop = SaveFaceCurveLoop(topFace); // 儲存所有Face的封閉曲線
+                        //Solid mySolid = CreateSolid(curveLoop).GetResult();
+                        //BRepBuilder brepBuilder = CreateSolid(curveLoop); // 建立封閉面的Solid
+
+                        //DirectShape directShape = DirectShape.CreateElement(doc, floor.Category.Id);
+                        //directShape.ApplicationId = "road";
+                        //directShape.ApplicationDataId = "road.com";
+                        //directShape.SetShape(curveLoop);
                     }
+                    catch (Exception ex)
+                    {
+                        string msg = ex.Message + "\n" + ex.ToString();
+                    }
+                    //}
                 }
                 trans.Commit();
                 uidoc.RefreshActiveView();
@@ -70,13 +75,14 @@ namespace Lane
             return Result.Succeeded;
         }
         // 儲存所有Face的封閉曲線
-        private List<GeometryObject> SaveFaceCurveLoop(Face topFace)
+        private List<Curve> SaveFaceCurveLoop(Face topFace)
         {
             Transform transform = new Transform(Transform.CreateTranslation(new XYZ(0, 0, 0)));
-            List<GeometryObject> resultList = new List<GeometryObject>();
+            List<Curve> resultList = new List<Curve>();
             IList<CurveLoop> curveLoops = topFace.GetEdgesAsCurveLoops(); // 頂面的封閉曲線
             // 複製偏移的頂面
             double height = UnitUtils.ConvertToInternalUnits(210, UnitTypeId.Centimeters);
+            // 底面
             foreach (EdgeArray edgeArray in topFace.EdgeLoops)
             {
                 foreach (Edge edge in edgeArray)
@@ -86,6 +92,21 @@ namespace Lane
                     foreach (XYZ xyz in curve.Tessellate())
                     {
                         curveXYZs.Add(new XYZ(xyz.X, xyz.Y, xyz.Z + height));
+                    }
+                    curve = NurbSpline.CreateCurve(HermiteSpline.Create(curveXYZs, false)).CreateTransformed(transform);
+                    resultList.Add(curve);
+                }
+            }
+            // 頂面
+            foreach (EdgeArray edgeArray in topFace.EdgeLoops)
+            {
+                foreach (Edge edge in edgeArray)
+                {
+                    Curve curve = edge.AsCurveFollowingFace(topFace);
+                    IList<XYZ> curveXYZs = new List<XYZ>();
+                    foreach (XYZ xyz in curve.Tessellate())
+                    {
+                        curveXYZs.Add(new XYZ(xyz.X, xyz.Y, xyz.Z));
                     }
                     curve = NurbSpline.CreateCurve(HermiteSpline.Create(curveXYZs, false)).CreateTransformed(transform);
                     resultList.Add(curve);
@@ -122,6 +143,16 @@ namespace Lane
 
             return resultList;
         }
+        // 建立封閉面的Solid
+        private BRepBuilder CreateSolid(List<Curve> curveLoop)
+        {
+            BRepBuilder brepBuilder = new BRepBuilder(BRepType.Solid);
+            foreach(Curve curve in curveLoop)
+            {
+
+            }
+            return brepBuilder;
+        }
         public static List<GeometryObject> GetElementSolids(Floor floor, Document doc)
         {
             List<GeometryObject> list = new List<GeometryObject>();
@@ -131,7 +162,6 @@ namespace Lane
             list = GetSolidsAndCurves(floor, list, options);
             return list;
         }
-
         public static List<GeometryObject> GetSolidsAndCurves(Floor floor, List<GeometryObject> resultList, Options geoOpt)
         {
             using (IEnumerator<GeometryObject> enumerator = floor.get_Geometry(geoOpt).GetEnumerator())
