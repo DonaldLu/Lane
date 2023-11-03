@@ -53,6 +53,7 @@ namespace Lane
                         {
                             ElementId materialId = floor.Category.Id;
                             CreateCrushFaces(doc, topFace, materialId); // 建立Face的封閉曲線(座標點不用重複)
+                            //break;
                         }
                         catch (Exception ex)
                         {
@@ -188,16 +189,20 @@ namespace Lane
                 }
             }
 
-            builder.CloseConnectedFaceSet();
-            builder.Target = TessellatedShapeBuilderTarget.AnyGeometry;
-            builder.Fallback = TessellatedShapeBuilderFallback.Mesh;
-            builder.Build();
+            try
+            {
+                builder.CloseConnectedFaceSet();
+                builder.Target = TessellatedShapeBuilderTarget.Solid;
+                builder.Fallback = TessellatedShapeBuilderFallback.Abort;
+                builder.Build();
 
-            TessellatedShapeBuilderResult result = builder.GetBuildResult();
-            DirectShape ds = DirectShape.CreateElement(doc, materialId);
-            ds.ApplicationId = "Application id";
-            ds.ApplicationDataId = "Geometry object id";
-            ds.SetShape(result.GetGeometricalObjects());
+                TessellatedShapeBuilderResult result = builder.GetBuildResult();
+                DirectShape ds = DirectShape.CreateElement(doc, materialId);
+                ds.ApplicationId = "Application id";
+                ds.ApplicationDataId = "Geometry object id";
+                ds.SetShape(result.GetGeometricalObjects());
+            }
+            catch(Exception ex) { }
         }
         // 儲存所有Face的封閉曲線
         private List<Curve> SaveFaceCurveLoop(Face topFace)
