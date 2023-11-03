@@ -76,6 +76,7 @@ namespace RevitFamilyInstanceLock
             return resultList;
         }
 
+        [Obsolete]
         public static bool AddParameterToSharedParameter(FamilySymbol fs, List<Parameter> pList, Document doc)
         {
             bool result;
@@ -97,10 +98,10 @@ namespace RevitFamilyInstanceLock
                         File.Create(doc.Application.SharedParametersFilename).Close();
                         definitionFile = application.OpenSharedParameterFile();
                     }
-                    DefinitionGroup definitionGroup = definitionFile.Groups.get_Item("鉤逸科技");
+                    DefinitionGroup definitionGroup = definitionFile.Groups.get_Item("Donald");
                     if (definitionGroup == null)
                     {
-                        definitionGroup = definitionFile.Groups.Create("鉤逸科技");
+                        definitionGroup = definitionFile.Groups.Create("Donald");
                     }
                     foreach (Parameter current in pList)
                     {

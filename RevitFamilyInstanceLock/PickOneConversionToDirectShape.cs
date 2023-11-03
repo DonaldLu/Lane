@@ -76,7 +76,7 @@ namespace RevitFamilyInstanceLock
                                 }
                                 List<GeometryObject> list2 = CommonTools.GetElementSolids(current, doc);
                                 DirectShape directShape = DirectShape.CreateElement(doc, current.Category.Id);
-                                directShape.ApplicationId = "鉤逸科技";
+                                directShape.ApplicationId = "Donald";
                                 directShape.ApplicationDataId = "sugoiitech.com";
                                 if (directShape.IsValidShape(list2) && list2.Count != 0)
                                 {
