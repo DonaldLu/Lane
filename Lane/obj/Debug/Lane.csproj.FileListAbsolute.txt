@@ -1,8 +1,8 @@
 C:\Prj\Revit\Lane\Lane\bin\Debug\Lane.dll
 C:\Prj\Revit\Lane\Lane\bin\Debug\Lane.pdb
 C:\Prj\Revit\Lane\Lane\obj\Debug\Lane.csproj.AssemblyReference.cache
+C:\Prj\Revit\Lane\Lane\obj\Debug\Lane.Properties.Resources.resources
+C:\Prj\Revit\Lane\Lane\obj\Debug\Lane.csproj.GenerateResource.cache
 C:\Prj\Revit\Lane\Lane\obj\Debug\Lane.csproj.CoreCompileInputs.cache
 C:\Prj\Revit\Lane\Lane\obj\Debug\Lane.dll
 C:\Prj\Revit\Lane\Lane\obj\Debug\Lane.pdb
-C:\Prj\Revit\Lane\Lane\obj\Debug\Lane.Properties.Resources.resources
-C:\Prj\Revit\Lane\Lane\obj\Debug\Lane.csproj.GenerateResource.cache
