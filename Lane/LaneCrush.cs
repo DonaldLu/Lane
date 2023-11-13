@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Windows.Media.Media3D;
 using Material = Autodesk.Revit.DB.Material;
 
 namespace Lane
@@ -13,16 +14,10 @@ namespace Lane
     [Transaction(TransactionMode.Manual)]
     public class LaneCrush : IExternalCommand
     {
-        public class StartEndPoint
+        public class CrushElemInfo
         {
-            public XYZ start = new XYZ();
-            public XYZ end = new XYZ();
-            public List<XYZ> xyzs = new List<XYZ>();
-            public XYZ other = new XYZ();
-            public bool isPeriodic = false;
-            public List<XYZ> tangents = new List<XYZ>();
-            public Double perimeter = 0.0;
-            public string type = string.Empty;
+            public string hostName { get; set; }
+            public List<string> crushElemName = new List<string>();
         }
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
@@ -31,51 +26,84 @@ namespace Lane
             Application app = uiapp.Application;
             Document doc = uidoc.Document;
 
-            IList<ElementFilter> elementFilters = new List<ElementFilter>(); // 清空過濾器
-            ElementCategoryFilter roomFilter = new ElementCategoryFilter(BuiltInCategory.OST_Floors); // 房間
-            elementFilters.Add(roomFilter);
-            LogicalOrFilter logicalOrFilter = new LogicalOrFilter(elementFilters);
-            List<Floor> floors = new FilteredElementCollector(doc).WherePasses(logicalOrFilter).WhereElementIsNotElementType().Where(x => x is Floor)
-                                    .Where(x => x.LookupParameter("樓板高程") != null).Where(x => x.LookupParameter("樓板高程").AsValueString().Equals("車道板")).Cast<Floor>().ToList();
-            //floors = floors.Where(x => x.Id.IntegerValue.Equals(2250673)).Cast<Floor>().ToList();
-            double height = UnitUtils.ConvertToInternalUnits(210, UnitTypeId.Centimeters);
-            TransactionGroup tranGrp = new TransactionGroup(doc, "車道板校核");
-            tranGrp.Start();
-            using (Transaction trans = new Transaction(doc, "生成干涉模型"))
+            InputHeightForm inputHeightForm = new InputHeightForm();
+            inputHeightForm.ShowDialog();
+            if (inputHeightForm.trueOrFalse == true)
             {
-                // 取得樓板的頂面輪廓
-                foreach (Floor floor in floors)
+                IList<ElementFilter> elementFilters = new List<ElementFilter>(); // 清空過濾器
+                ElementCategoryFilter roomFilter = new ElementCategoryFilter(BuiltInCategory.OST_Floors); // 樓板
+                elementFilters.Add(roomFilter);
+                LogicalOrFilter logicalOrFilter = new LogicalOrFilter(elementFilters);
+                RemoveElems(uidoc, doc, logicalOrFilter); // 移除干涉元件
+                List<Floor> floors = new FilteredElementCollector(doc).WherePasses(logicalOrFilter).WhereElementIsNotElementType().Where(x => x is Floor)
+                                        .Where(x => x.LookupParameter("樓板高程") != null).Where(x => x.LookupParameter("樓板高程").AsValueString().Equals("車道板")).Cast<Floor>().ToList();
+                //floors = floors.Where(x => x.Id.IntegerValue.Equals(2250673)).Cast<Floor>().ToList(); // 測試
+                double height = UnitUtils.ConvertToInternalUnits(inputHeightForm.height, UnitTypeId.Centimeters);
+                TransactionGroup tranGrp = new TransactionGroup(doc, "車道板校核");
+                tranGrp.Start();
+                using (Transaction trans = new Transaction(doc, "生成干涉模型"))
                 {
-                    List<Solid> solidList = GetRoadwayPlankSolids(doc, floor); // 儲存所有車道板的Solid
-                    List<Face> topFaces = GetTopFaces(solidList); // 取得車道的頂面
-                    foreach (Face topFace in topFaces)
+                    // 取得樓板的頂面輪廓
+                    foreach (Floor floor in floors)
                     {
-                        try
+                        ElementId materialId = floor.Category.Id;
+                        string number = string.Empty;
+                        try { number = floor.LookupParameter("編號").AsValueString(); }
+                        catch (Exception) { }
+                        List<Solid> crushSolids = new List<Solid>();
+                        List<Solid> solidList = GetSolids(doc, floor); // 儲存所有車道板的Solid
+                        List<Face> topFaces = GetTopFaces(solidList); // 取得車道的頂面
+                        foreach (Face topFace in topFaces)
                         {
-                            trans.Start();
-                            ElementId materialId = floor.Category.Id;
-                            BlandGeometry(doc, topFace, height, materialId);
-                            //// 建立Face的封閉曲線(座標點不用重複) 
-                            //if (topFace is RuledFace) { GetTessellatedSolid(doc, topFace, height, materialId); }
-                            //else { CreateCrushFaces(doc, topFace, height, materialId); }
-                            trans.Commit();
-                            uidoc.RefreshActiveView();
-                        }
-                        catch (Exception ex)
-                        {
-                            string msg = ex.Message + "\n" + ex.ToString();
+                            try
+                            {
+                                trans.Start();
+                                Solid crushSolid = CreateCrushSolids(doc, topFace, height, materialId, floor.Id, number); // 使用CreateLoftGeometry擠出車道板頂面Solid
+                                crushSolids.Add(crushSolid);
+                                //// 建立Face的封閉曲線(座標點不用重複)
+                                //if (topFace is RuledFace) { GetTessellatedSolid(doc, topFace, height, materialId); }
+                                //else { CreateCrushFaces(doc, topFace, height, materialId); }
+                                trans.Commit();
+                                uidoc.RefreshActiveView();
+                            }
+                            catch (Exception ex)
+                            {
+                                string msg = ex.Message + "\n" + ex.ToString();
+                            }
                         }
                     }
                 }
-            }
-            tranGrp.Assimilate();
+                tranGrp.Assimilate();
 
-            CrushReport(doc, logicalOrFilter); // 出衝突報告
+                List<CrushElemInfo> crushElemInfos = CrushReport(doc, logicalOrFilter, floors); // 出衝突報告
+                if(crushElemInfos.Count > 0)
+                {
+                    LaneCrushForm laneCrushForm = new LaneCrushForm(uiapp, crushElemInfos);
+                    laneCrushForm.Show();
+                }
+                else
+                {
+                    TaskDialog.Show("Revit", "車道板無干涉到的元件");
+                }
+            }
 
             return Result.Succeeded;
         }
+        // 移除干涉元件
+        private void RemoveElems(UIDocument uidoc, Document doc, LogicalOrFilter logicalOrFilter)
+        {
+            List<ElementId> crushFloorIds = new FilteredElementCollector(doc).WherePasses(logicalOrFilter).WhereElementIsNotElementType().Where(x => x is DirectShape).Cast<DirectShape>()
+                                        .Where(x => x.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS).AsValueString().Contains("車道板干涉元件")).Select(x => x.Id).ToList();
+            using (Transaction trans = new Transaction(doc, "移除干涉元件"))
+            {
+                trans.Start();
+                doc.Delete(crushFloorIds);
+                trans.Commit();
+                uidoc.RefreshActiveView();
+            }
+        }
         // 儲存所有車道板的Solid
-        private List<Solid> GetRoadwayPlankSolids(Document doc, Element floor)
+        private List<Solid> GetSolids(Document doc, Element elem)
         {
             List<Solid> solidList = new List<Solid>();
 
@@ -86,7 +114,7 @@ namespace Lane
             options.ComputeReferences = true;
             options.IncludeNonVisibleObjects = true;
             // 得到幾何元素
-            GeometryElement geomElem = floor.get_Geometry(options);
+            GeometryElement geomElem = elem.get_Geometry(options);
             List<Solid> solids = GeometrySolids(geomElem);
             foreach (Solid solid in solids)
             {
@@ -143,7 +171,8 @@ namespace Lane
             }
             return topFaces;
         }
-        private void BlandGeometry(Document doc, Face topFace, double height, ElementId materialId)
+        // 使用CreateLoftGeometry擠出車道板頂面Solid
+        private Solid CreateCrushSolids(Document doc, Face topFace, double height, ElementId materialId, ElementId floorId, string number)
         {
             CurveLoop buttomCurves = new CurveLoop();
             CurveLoop topCurves = new CurveLoop();
@@ -176,27 +205,26 @@ namespace Lane
                 }
                 topCurves = CurveLoop.Create(curves);
             }
-            ICollection<VertexPair> vertices = new List<VertexPair>();
-            for(int i = 0; i < buttomCurves.Count(); i++)
-            {
-                VertexPair vertexPair = new VertexPair(i, i);
-                vertices.Add(vertexPair);
-            }
+
+            IList<CurveLoop> curveLoops = new List<CurveLoop>();
+            curveLoops.Add(buttomCurves);
+            curveLoops.Add(topCurves);
+            Solid solid = null;
             try
             {
-                IList<CurveLoop> curveLoops = new List<CurveLoop>();
-                curveLoops.Add(buttomCurves);
-                curveLoops.Add(topCurves); 
                 SolidOptions options = new SolidOptions(materialId, materialId);
-                Solid solid = GeometryCreationUtilities.CreateLoftGeometry(curveLoops, options);
-                var ds = DirectShape.CreateElement(doc, materialId);
+                solid = GeometryCreationUtilities.CreateLoftGeometry(curveLoops, options);
+                DirectShape ds = DirectShape.CreateElement(doc, materialId);
                 ds.ApplicationId = "Application id";
                 ds.ApplicationDataId = "Geometry object id";
-                ds.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS).Set("車道板干涉元件");
+                ds.LookupParameter("編號").Set(number);
+                ds.LookupParameter("樓板高程").Set("車道板");
+                ds.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS).Set(floorId + "：車道板干涉元件");
                 ds.SetShape(new List<GeometryObject>() { solid });
             }
-            catch (Exception e) { }
-            //Solid transformBox = SolidUtils.CreateTransformed(preTransformBox, new Transform(Transform.CreateTranslation(new XYZ(0, 0, 0))));
+            catch (Exception e) { string error = e.Message + "\n" + e.ToString(); }
+
+            return solid;
         }
         // RuledFace建立Face的封閉曲線(座標點不用重複)
         private void GetTessellatedSolid(Document doc, Face topFace, double height, ElementId materialId)
@@ -376,29 +404,71 @@ namespace Lane
                               Math.Round(curve.Tessellate()[i].Z + height, 8, MidpointRounding.AwayFromZero));
             return xyz;
         }
-        // 出衝突報告
-        private void CrushReport(Document doc, LogicalOrFilter logicalOrFilter)
+        // 聯集所有Crush Solid
+        private Solid UnionSolids(IList<Solid> solids, Solid hostSolid)
         {
-            // 出衝突報告
-            string report = string.Empty;
-            List<DirectShape> crushFloors = new FilteredElementCollector(doc).WherePasses(logicalOrFilter).WhereElementIsNotElementType().Where(x => x is DirectShape).Cast<DirectShape>().ToList();
-            foreach (DirectShape crushFloor in crushFloors)
+            Solid unionSolid = null;
+            foreach (Solid subSolid in solids)
             {
-                ICollection<ElementId> elementIds = new List<ElementId>();
-                elementIds.Add(crushFloor.Id);
-                List<Solid> solidList = GetRoadwayPlankSolids(doc, crushFloor); // 儲存所有車道板的Solid
-                foreach (Solid solid in solidList)
+                if (subSolid.Volume != 0)
                 {
-                    IList<Element> elems = new FilteredElementCollector(doc).WherePasses(new ElementIntersectsSolidFilter(solid)).Excluding(elementIds).ToList();
-                    if (elems.Count > 0) { report += crushFloor.Id + "："; }
-                    foreach (Element elem in elems)
+                    try
                     {
-                        report += elem.Id + ", ";
+                        unionSolid = BooleanOperationsUtils.ExecuteBooleanOperation(hostSolid, subSolid, BooleanOperationsType.Union);
+                        hostSolid = unionSolid;
                     }
-                    if (elems.Count > 0) { report = report.Substring(0, report.Length - 2) + "\n"; }
+                    catch (Autodesk.Revit.Exceptions.InvalidOperationException) { }
                 }
             }
-            TaskDialog.Show("Revit", report);
+
+            return hostSolid;
+        }
+        // 出衝突報告
+        private List<CrushElemInfo> CrushReport(Document doc, LogicalOrFilter logicalOrFilter, List<Floor> floors)
+        {
+            // 出衝突報告
+            List<CrushElemInfo> crushElemInfos = new List<CrushElemInfo>();
+            List<DirectShape> crushFloors = new FilteredElementCollector(doc).WherePasses(logicalOrFilter).WhereElementIsNotElementType().Where(x => x is DirectShape).Cast<DirectShape>()
+                                            .Where(x => x.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS).AsValueString() != null)
+                                            .Where(x => x.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS).AsValueString().Contains("車道板干涉元件")).ToList();
+            List<ElementId> crushFloorIds = crushFloors.Select(x => x.Id).ToList();
+            foreach(Floor floor in floors) { crushFloorIds.Add(floor.Id); }
+            foreach (DirectShape crushFloor in crushFloors)
+            {
+                try
+                {
+                    int floorId = Convert.ToInt32(crushFloor.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS).AsValueString().Split('：')[0]);
+                    List<Solid> solidList = GetSolids(doc, crushFloor); // 儲存所有車道板的Solid
+                    foreach (Solid solid in solidList)
+                    {
+                        IList<Element> elems = new FilteredElementCollector(doc).WherePasses(new ElementIntersectsSolidFilter(solid)).Excluding(crushFloorIds).ToList();
+                        if (elems.Count > 0)
+                        {
+                            string hostName = doc.GetElement(new ElementId(floorId)).Name + "：" + floorId;
+                            CrushElemInfo crushElemInfo = new CrushElemInfo();
+                            if(crushElemInfos.Where(x => x.hostName.Equals(hostName)).FirstOrDefault() != null)
+                            {
+                                crushElemInfo = crushElemInfos.Where(x => x.hostName.Equals(hostName)).FirstOrDefault();
+                            }
+                            else
+                            {
+                                crushElemInfo.hostName = hostName;
+                            }
+                            foreach (Element elem in elems)
+                            {
+                                crushElemInfo.crushElemName.Add(elem.Name + "：" + elem.Id + "、干涉車道板：" + crushFloor.Id);
+                            }
+                            if (crushElemInfos.Where(x => x.hostName.Equals(hostName)).FirstOrDefault() == null)
+                            {
+                                crushElemInfos.Add(crushElemInfo);
+                            }
+                        }
+                    }
+                }
+                catch(Exception) { }
+            }
+
+            return crushElemInfos;
         }
         // 儲存所有Face的封閉曲線
         private List<Curve> SaveFaceCurveLoop(Face topFace)
