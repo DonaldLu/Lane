@@ -55,6 +55,7 @@
     <Reference Include="WindowsBase" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="CreateCrushElems.cs" />
     <Compile Include="InputHeightForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -75,8 +76,7 @@
       <DesignTime>True</DesignTime>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
-    <Compile Include="RemoveElem.cs" />
-    <Compile Include="RevitAPI.cs" />
+    <Compile Include="RemoveCrushElems.cs" />
     <Compile Include="RevitDocument.cs" />
   </ItemGroup>
   <ItemGroup>
@@ -94,6 +94,15 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="Resources\Lane.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Resources\干涉檢查.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Resources\移除干涉元件.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Resources\LuSir.bmp" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

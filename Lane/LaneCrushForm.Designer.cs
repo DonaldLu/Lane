@@ -31,6 +31,8 @@
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(LaneCrushForm));
             this.treeView1 = new System.Windows.Forms.TreeView();
             this.colseBtn = new System.Windows.Forms.Button();
+            this.reviewBtn = new System.Windows.Forms.Button();
+            this.exportBtn = new System.Windows.Forms.Button();
             this.SuspendLayout();
             // 
             // treeView1
@@ -53,13 +55,37 @@
             this.colseBtn.TabIndex = 4;
             this.colseBtn.Text = "關閉";
             this.colseBtn.UseVisualStyleBackColor = true;
-            this.colseBtn.Click += new System.EventHandler(this.cancelBtn_Click);
+            this.colseBtn.Click += new System.EventHandler(this.colseBtn_Click);
+            // 
+            // reviewBtn
+            // 
+            this.reviewBtn.Anchor = System.Windows.Forms.AnchorStyles.Bottom;
+            this.reviewBtn.Location = new System.Drawing.Point(133, 469);
+            this.reviewBtn.Name = "reviewBtn";
+            this.reviewBtn.Size = new System.Drawing.Size(75, 36);
+            this.reviewBtn.TabIndex = 4;
+            this.reviewBtn.Text = "重新檢核";
+            this.reviewBtn.UseVisualStyleBackColor = true;
+            this.reviewBtn.Click += new System.EventHandler(this.reviewBtn_Click);
+            // 
+            // exportBtn
+            // 
+            this.exportBtn.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
+            this.exportBtn.Location = new System.Drawing.Point(12, 469);
+            this.exportBtn.Name = "exportBtn";
+            this.exportBtn.Size = new System.Drawing.Size(75, 36);
+            this.exportBtn.TabIndex = 4;
+            this.exportBtn.Text = "匯出報告";
+            this.exportBtn.UseVisualStyleBackColor = true;
+            this.exportBtn.Click += new System.EventHandler(this.exportBtn_Click);
             // 
             // LaneCrushForm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 17F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(343, 517);
+            this.Controls.Add(this.exportBtn);
+            this.Controls.Add(this.reviewBtn);
             this.Controls.Add(this.colseBtn);
             this.Controls.Add(this.treeView1);
             this.Font = new System.Drawing.Font("微軟正黑體", 9.75F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(136)));
@@ -76,5 +102,7 @@
 
         private System.Windows.Forms.TreeView treeView1;
         private System.Windows.Forms.Button colseBtn;
+        private System.Windows.Forms.Button reviewBtn;
+        private System.Windows.Forms.Button exportBtn;
     }
 }
