@@ -55,7 +55,6 @@
     <Reference Include="WindowsBase" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="CreateCrushElems.cs" />
     <Compile Include="InputHeightForm.cs">
       <SubType>Form</SubType>
     </Compile>

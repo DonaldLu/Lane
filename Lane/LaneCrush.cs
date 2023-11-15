@@ -13,8 +13,8 @@ namespace Lane
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
-            IExternalEventHandler handler_CreateCrushElems = new CreateCrushElems();
-            ExternalEvent externalEvent_CreateCrushElems = ExternalEvent.Create(handler_CreateCrushElems);
+            //IExternalEventHandler handler_CreateCrushElems = new CreateCrushElems();
+            //ExternalEvent externalEvent_CreateCrushElems = ExternalEvent.Create(handler_CreateCrushElems);
             //commandData.Application.Idling += Application_Idling;
             RevitDocument m_connect = new RevitDocument(commandData.Application);
 

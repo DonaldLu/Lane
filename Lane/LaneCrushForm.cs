@@ -6,19 +6,21 @@ using System.Data;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
-using System.Windows.Media;
-using static Lane.CreateCrushElems;
-using Form = System.Windows.Forms.Form;
 
 namespace Lane
 {
-    public partial class LaneCrushForm : Form
+    public partial class LaneCrushForm : System.Windows.Forms.Form
     {
         UIApplication revitUIApp = null;
         UIDocument revitUIDoc = null;
         Document revitDoc = null;
         public static double height {  get; set; }
         private List<string> errorMessages = new List<string>();
+        public class CrushElemInfo
+        {
+            public string hostName { get; set; }
+            public List<string> crushElemName = new List<string>();
+        }
 
         public LaneCrushForm(UIApplication uiapp, double inputHeight)
         {
@@ -27,16 +29,7 @@ namespace Lane
             revitDoc = uiapp.ActiveUIDocument.Document;
             height = inputHeight;
             List<CrushElemInfo> crushElemInfos = CreateCrushElems(revitUIDoc, revitDoc);
-            errorMessages = errorMessages.Distinct().ToList();
-            string error = "";
-            for (int i = 0; i < errorMessages.Count; i++)
-            {
-                error += i + ". " + errorMessages[i] + "\n";
-            }
-            if(error != "")
-            {
-                TaskDialog.Show("Error", error);
-            }
+            ShowErrorMessage(); // 顯示錯誤訊息
 
             InitializeComponent();
             CreateNodes(crushElemInfos); // 新增節點
@@ -46,8 +39,8 @@ namespace Lane
         private List<CrushElemInfo> CreateCrushElems(UIDocument uidoc, Document doc)
         {
             IList<ElementFilter> elementFilters = new List<ElementFilter>(); // 清空過濾器
-            ElementCategoryFilter roomFilter = new ElementCategoryFilter(BuiltInCategory.OST_Floors); // 樓板
-            elementFilters.Add(roomFilter);
+            ElementCategoryFilter floorFilter = new ElementCategoryFilter(BuiltInCategory.OST_Floors); // 樓板
+            elementFilters.Add(floorFilter);
             LogicalOrFilter logicalOrFilter = new LogicalOrFilter(elementFilters);
             RemoveElems(uidoc, doc, logicalOrFilter); // 移除干涉元件
             List<Floor> floors = new List<Floor>();
@@ -69,28 +62,19 @@ namespace Lane
             tranGrp.Start();
             using (Transaction trans = new Transaction(doc, "生成干涉模型"))
             {
+                trans.Start();
                 // 取得樓板的頂面輪廓
                 foreach (Floor floor in floors)
                 {
                     ElementId materialId = floor.Category.Id;
                     string number = "";
-                    //try { number = floor.LookupParameter("編號").AsString(); }
-                    //catch (Exception ex) { errorMessages.Add(floor.Id + " 無「編號」參數\n" + ex.Message + "\n" + ex.ToString()); }
-                    List<Solid> crushSolids = new List<Solid>();
                     List<Solid> solidList = GetSolids(doc, floor); // 儲存所有車道板的Solid
                     List<Face> topFaces = GetTopFaces(solidList); // 取得車道的頂面
                     foreach (Face topFace in topFaces)
                     {
                         try
                         {
-                            trans.Start();
                             Solid crushSolid = CreateCrushSolids(doc, topFace, height, materialId, floor.Id, number); // 使用CreateLoftGeometry擠出車道板頂面Solid
-                            crushSolids.Add(crushSolid);
-                            //// 建立Face的封閉曲線(座標點不用重複)
-                            //if (topFace is RuledFace) { GetTessellatedSolid(doc, topFace, height, materialId); }
-                            //else { CreateCrushFaces(doc, topFace, height, materialId); }
-                            trans.Commit();
-                            uidoc.RefreshActiveView();
                         }
                         catch (Exception ex)
                         {
@@ -98,6 +82,8 @@ namespace Lane
                         }
                     }
                 }
+                trans.Commit();
+                uidoc.RefreshActiveView();
             }
             tranGrp.Assimilate();
 
@@ -242,8 +228,6 @@ namespace Lane
                 DirectShape ds = DirectShape.CreateElement(doc, materialId);
                 ds.ApplicationId = "Application id";
                 ds.ApplicationDataId = "Geometry object id";
-                //try { ds.LookupParameter("編號").Set(number); }
-                //catch(Exception ex) { errorMessages.Add(floorId + " 無「編號」參數\n" + ex.Message + "\n" + ex.ToString()); }
                 ds.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS).Set(floorId + "：車道板干涉元件");
                 ds.SetShape(new List<GeometryObject>() { solid });
             }
@@ -285,21 +269,35 @@ namespace Lane
                 CrushElemInfo crushElemInfo = new CrushElemInfo();
                 string hostName = doc.GetElement(floor.Id).Name + "：" + floor.Id.ToString();
                 crushElemInfo.hostName = hostName;
+
                 foreach (DirectShape directShape in directShapes)
                 {
+                    // 使用BoundingBoxIntersectsFilter、BoundingBoxIsInsideFilter快篩先檢查干涉物件
+                    Outline outline = new Outline(directShape.get_BoundingBox(doc.ActiveView).Min, directShape.get_BoundingBox(doc.ActiveView).Max);
+                    IList<ElementFilter> elementFilters = new List<ElementFilter>(); // 清空過濾器
+                    BoundingBoxIntersectsFilter boxIntersectsFilter = new BoundingBoxIntersectsFilter(outline);
+                    BoundingBoxIsInsideFilter boxIsInsideFilter = new BoundingBoxIsInsideFilter(outline);
+                    elementFilters.Add(boxIntersectsFilter);
+                    elementFilters.Add(boxIsInsideFilter);
+                    LogicalOrFilter bbFilters = new LogicalOrFilter(elementFilters);
+                    IList<Element> boxFilterElems = new FilteredElementCollector(doc).WherePasses(bbFilters).WhereElementIsNotElementType().Excluding(crushFloorIds).ToList();
+
                     try
                     {
-                        List<Solid> solidList = GetSolids(doc, directShape); // 儲存所有車道板的Solid
+                        List<Solid> solidList = GetSolids(doc, directShape); // 干涉元件的Solid
                         foreach (Solid solid in solidList)
                         {
-                            IList<Element> elems = new FilteredElementCollector(doc).WherePasses(new ElementIntersectsSolidFilter(solid)).Excluding(crushFloorIds).ToList();
-                            if (elems.Count > 0)
+                            foreach (Element boxFilterElem in boxFilterElems)
                             {
-                                foreach (Element elem in elems)
+                                IList<Element> elems = new FilteredElementCollector(doc, new List<ElementId>() { boxFilterElem.Id }).WherePasses(new ElementIntersectsSolidFilter(solid)).WhereElementIsNotElementType().Excluding(crushFloorIds).ToList();
+                                if (elems.Count > 0)
                                 {
-                                    crushElemInfo.crushElemName.Add(elem.Name + "：" + elem.Id + "、干涉車道板：" + directShape.Id);
+                                    foreach (Element elem in elems)
+                                    {
+                                        crushElemInfo.crushElemName.Add(elem.Name + "：" + elem.Id + "、干涉車道板：" + directShape.Id);
+                                    }
+                                    crushElemInfo.crushElemName = crushElemInfo.crushElemName.OrderBy(x => x).ToList();
                                 }
-                                crushElemInfo.crushElemName = crushElemInfo.crushElemName.OrderBy(x => x).ToList();
                             }
                         }
                     }
@@ -323,17 +321,14 @@ namespace Lane
             {
                 treeView1.Nodes.Add(hostName);
                 treeView1.Nodes[0].Checked = true;
-                List<List<string>> crushElemNameList = (from x in crushElemInfos
-                                                        where x.hostName.Equals(hostName)
-                                                        select x).Select(x => x.crushElemName).ToList();
+                List<List<string>> crushElemNameList = crushElemInfos.Where(x => x.hostName.Equals(hostName)).Select(x => x.crushElemName).ToList();
                 int nodeCount = 0;
                 foreach (List<string> crushElemNames in crushElemNameList)
                 {
                     foreach (string crushElemName in crushElemNames)
                     {
-                        treeView1.Nodes[hostNameCount].Nodes.Add(crushElemName);
-                        // 預設勾選
-                        treeView1.Nodes[hostNameCount].Nodes[nodeCount].Checked = true;
+                        treeView1.Nodes[hostNameCount].Nodes.Add(crushElemName);                        
+                        treeView1.Nodes[hostNameCount].Nodes[nodeCount].Checked = true; // 預設勾選
                         nodeCount++;
                     }
                 }
@@ -344,8 +339,8 @@ namespace Lane
         private List<CrushElemInfo> ReviewReport(Document doc)
         {
             IList<ElementFilter> elementFilters = new List<ElementFilter>(); // 清空過濾器
-            ElementCategoryFilter roomFilter = new ElementCategoryFilter(BuiltInCategory.OST_Floors); // 樓板
-            elementFilters.Add(roomFilter);
+            ElementCategoryFilter floorFilter = new ElementCategoryFilter(BuiltInCategory.OST_Floors); // 樓板
+            elementFilters.Add(floorFilter);
             LogicalOrFilter logicalOrFilter = new LogicalOrFilter(elementFilters);
             List<Floor> floors = new List<Floor>();
             try
@@ -362,23 +357,36 @@ namespace Lane
 
             return crushElemInfo;
         }
+        // 顯示錯誤訊息
+        private void ShowErrorMessage()
+        {
+            errorMessages = errorMessages.Distinct().ToList();
+            string error = "";
+            for (int i = 0; i < errorMessages.Count; i++)
+            {
+                error += i + ". " + errorMessages[i] + "\n";
+            }
+            if (error != "")
+            {
+                TaskDialog.Show("Error", error);
+            }
+        }
         // 亮顯元件
         private void treeView1_AfterSelect(object sender, TreeViewEventArgs e)
         {
             // 檢查狀態變更時, 才會執行
             if (e.Action != TreeViewAction.Unknown)
             {
-                if (e.Node.IsSelected)
+                if (e.Node.IsSelected) // 亮顯id元件
                 {
                     try
                     {
                         if (e.Node.Level.Equals(0))
-                        {
-                            string[] nodeTest = e.Node.Text.Split('：');
-                            ElementId hostId = new ElementId(Convert.ToInt32(nodeTest[1]));
-                            // 亮顯id元件
+                        {                            
                             try
                             {
+                                string[] nodeText = e.Node.Text.Split('：');
+                                ElementId hostId = new ElementId(Convert.ToInt32(nodeText[1]));
                                 IList<ElementId> highlightElems = new List<ElementId>();
                                 highlightElems.Add(hostId);
                                 revitUIApp.ActiveUIDocument.ShowElements(highlightElems);
@@ -391,12 +399,11 @@ namespace Lane
                         }
                         else if (e.Node.Level.Equals(1))
                         {
-                            string[] nodeTest = e.Node.Text.Split('、');
-                            ElementId hostId = new ElementId(Convert.ToInt32(nodeTest[1].Split('：')[1]));
-                            ElementId crushElemId = new ElementId(Convert.ToInt32(nodeTest[0].Split('：')[1]));
-                            // 亮顯id元件
                             try
                             {
+                                string[] nodeText = e.Node.Text.Split('、');
+                                ElementId hostId = new ElementId(Convert.ToInt32(nodeText[1].Split('：')[1]));
+                                ElementId crushElemId = new ElementId(Convert.ToInt32(nodeText[0].Split('：')[1]));
                                 IList<ElementId> highlightElems = new List<ElementId>();
                                 highlightElems.Add(hostId);
                                 highlightElems.Add(crushElemId);

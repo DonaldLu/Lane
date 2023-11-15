@@ -1,6 +1,6 @@
 車道干涉校核
 
-CrushReport_V1.1
+CrushReport_V1.2
 
 此產品為sirlu所有，請勿違法使用。
 
@@ -9,4 +9,6 @@ CrushReport_V1.1
 C:\ProgramData\Autodesk\Revit\Addins\2022
 
 CrushReport_2022_Setup
+
+CrushReport_2022_V1.2
 
