@@ -15,7 +15,7 @@ namespace Lane
         UIDocument revitUIDoc = null;
         Document revitDoc = null;
         public static double height {  get; set; }
-        private List<string> errorMessages = new List<string>();
+        public List<string> errorMessages = new List<string>();
         public class CrushElemInfo
         {
             public string hostName { get; set; }
@@ -187,7 +187,8 @@ namespace Lane
         {
             CurveLoop buttomCurves = new CurveLoop();
             CurveLoop topCurves = new CurveLoop();
-            // 干涉元件底面
+            // 干涉元件底面, 找到最大邊長
+            double maxLength = 0.0;
             foreach (EdgeArray edgeArray in topFace.EdgeLoops)
             {
                 List<Curve> curves = new List<Curve>();
@@ -196,9 +197,15 @@ namespace Lane
                     Curve curve = edge.AsCurveFollowingFace(topFace);
                     curves.Add(curve);
                 }
-                buttomCurves = CurveLoop.Create(curves);
+                double curveLoopLength = curves.Select(x => x.Length).Sum();
+                if(curveLoopLength >= maxLength)
+                {
+                    buttomCurves = CurveLoop.Create(curves);
+                    maxLength = curveLoopLength;
+                }
             }
-            // 干涉元件頂面
+            // 干涉元件頂面, 找到最大邊長
+            maxLength = 0.0;
             foreach (EdgeArray edgeArray in topFace.EdgeLoops)
             {
                 List<Curve> curves = new List<Curve>();
@@ -214,7 +221,12 @@ namespace Lane
                     curve = NurbSpline.CreateCurve(HermiteSpline.Create(curveXYZs, false));
                     curves.Add(curve);
                 }
-                topCurves = CurveLoop.Create(curves);
+                double curveLoopLength = curves.Select(x => x.Length).Sum();
+                if (curveLoopLength >= maxLength)
+                {
+                    topCurves = CurveLoop.Create(curves);
+                    maxLength = curveLoopLength;
+                }
             }
 
             IList<CurveLoop> curveLoops = new List<CurveLoop>();
@@ -425,46 +437,53 @@ namespace Lane
         {
             FolderBrowserDialog path = new FolderBrowserDialog();
             path.ShowDialog();
-            string filePath = Path.Combine(path.SelectedPath, "匯出報告.txt");
-            string content = string.Empty;
-            if (treeView1.Nodes.Count.Equals(0))
+            if(path.SelectedPath != "")
             {
-                content = "車道板無干涉到的元件";
-            }
-            else
-            {
-                int i = 1;
-                foreach (TreeNode treeNode in treeView1.Nodes)
+                string filePath = Path.Combine(path.SelectedPath, "匯出報告.txt");
+                string content = string.Empty;
+                if (treeView1.Nodes.Count.Equals(0))
                 {
-                    content += i + "、" + treeNode.Text + "\n";
-                    List<string> subNodes = new List<string>();
-                    foreach (TreeNode subNode in treeNode.Nodes)
-                    {
-                        subNodes.Add(subNode.Text.Split('、')[0]);
-                    }
-                    subNodes = subNodes.Distinct().OrderBy(x => x.Split('：')[0]).ToList();
-                    foreach (string subNode in subNodes)
-                    {
-                        content += subNode + "\n";
-                    }
-                    i++;
-                    content += "\n";
+                    content = "車道板無干涉到的元件";
                 }
-            }
-            // 先檢查是否有此檔案, 沒有的話則新增
-            if (!File.Exists(filePath))
-            {
-                using (FileStream fs = File.Create(filePath))
+                else
                 {
+                    int i = 1;
+                    foreach (TreeNode treeNode in treeView1.Nodes)
+                    {
+                        content += i + "、" + treeNode.Text + "\n";
+                        List<string> subNodes = new List<string>();
+                        foreach (TreeNode subNode in treeNode.Nodes)
+                        {
+                            subNodes.Add(subNode.Text.Split('、')[0]);
+                        }
+                        subNodes = subNodes.Distinct().OrderBy(x => x.Split('：')[0]).ToList();
+                        foreach (string subNode in subNodes)
+                        {
+                            content += subNode + "\n";
+                        }
+                        i++;
+                        content += "\n";
+                    }
+                }
+                // 先檢查是否有此檔案, 沒有的話則新增
+                try
+                {
+                    if (!File.Exists(filePath))
+                    {
+                        using (FileStream fs = File.Create(filePath))
+                        {
 
+                        }
+                    }
+                    using (StreamWriter sw = new StreamWriter(filePath))
+                    {
+                        sw.WriteLine(content);
+                        sw.Close();
+                    }
+                    TaskDialog.Show("Revit", "匯出完成。");
                 }
+                catch(Exception ex) { TaskDialog.Show("Revit", ex.Message + "\n" + ex.ToString()); }
             }
-            using (StreamWriter sw = new StreamWriter(filePath))
-            {
-                sw.WriteLine(content);
-                sw.Close();
-            }
-            TaskDialog.Show("Revit", "匯出完成。");
         }
         // 重新檢核
         private void reviewBtn_Click(object sender, EventArgs e)
