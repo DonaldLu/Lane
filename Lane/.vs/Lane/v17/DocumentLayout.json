@@ -1,0 +1,84 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Prj\\Revit\\Lane\\Lane\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{7FE540CD-276C-4912-AB0B-E1B6B5E82BB3}|Lane.csproj|c:\\prj\\revit\\lane\\lane\\lanecrush_button.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{7FE540CD-276C-4912-AB0B-E1B6B5E82BB3}|Lane.csproj|solutionrelative:lanecrush_button.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{7FE540CD-276C-4912-AB0B-E1B6B5E82BB3}|Lane.csproj|C:\\Prj\\Revit\\Lane\\Lane\\lanecrushform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{7FE540CD-276C-4912-AB0B-E1B6B5E82BB3}|Lane.csproj|solutionrelative:lanecrushform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{7FE540CD-276C-4912-AB0B-E1B6B5E82BB3}|Lane.csproj|C:\\Prj\\Revit\\Lane\\Lane\\lanecrush.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{7FE540CD-276C-4912-AB0B-E1B6B5E82BB3}|Lane.csproj|solutionrelative:lanecrush.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{7FE540CD-276C-4912-AB0B-E1B6B5E82BB3}|Lane.csproj|C:\\Prj\\Revit\\Lane\\Lane\\properties\\resources.resx||{FF4D6ACA-9352-4A5F-821E-F4D6EBDCAB11}",
+      "RelativeMoniker": "D:0:0:{7FE540CD-276C-4912-AB0B-E1B6B5E82BB3}|Lane.csproj|solutionrelative:properties\\resources.resx||{FF4D6ACA-9352-4A5F-821E-F4D6EBDCAB11}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 0,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "LaneCrush_Button.cs",
+              "DocumentMoniker": "C:\\Prj\\Revit\\Lane\\Lane\\LaneCrush_Button.cs",
+              "RelativeDocumentMoniker": "LaneCrush_Button.cs",
+              "ToolTip": "C:\\Prj\\Revit\\Lane\\Lane\\LaneCrush_Button.cs",
+              "RelativeToolTip": "LaneCrush_Button.cs",
+              "ViewState": "AQIAAAAAAAAAAAAAAAAAACcAAAAAAAAA",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2023-11-20T06:29:24.058Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "Resources.resx",
+              "DocumentMoniker": "C:\\Prj\\Revit\\Lane\\Lane\\Properties\\Resources.resx",
+              "RelativeDocumentMoniker": "Properties\\Resources.resx",
+              "ToolTip": "C:\\Prj\\Revit\\Lane\\Lane\\Properties\\Resources.resx",
+              "RelativeToolTip": "Properties\\Resources.resx",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002870|",
+              "WhenOpened": "2023-11-20T06:26:40.386Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "LaneCrush.cs",
+              "DocumentMoniker": "C:\\Prj\\Revit\\Lane\\Lane\\LaneCrush.cs",
+              "RelativeDocumentMoniker": "LaneCrush.cs",
+              "ToolTip": "C:\\Prj\\Revit\\Lane\\Lane\\LaneCrush.cs",
+              "RelativeToolTip": "LaneCrush.cs",
+              "ViewState": "AQIAAAAAAAAAAAAAAAAAAAgAAAAFAAAA",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2023-11-17T00:34:42.013Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "LaneCrushForm.cs",
+              "DocumentMoniker": "C:\\Prj\\Revit\\Lane\\Lane\\LaneCrushForm.cs",
+              "RelativeDocumentMoniker": "LaneCrushForm.cs",
+              "ToolTip": "C:\\Prj\\Revit\\Lane\\Lane\\LaneCrushForm.cs",
+              "RelativeToolTip": "LaneCrushForm.cs",
+              "ViewState": "AQIAAEYAAAAAAAAAAAAowBACAAAJAAAA",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003525|",
+              "WhenOpened": "2023-11-17T00:34:45.111Z"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -67,14 +67,14 @@ namespace Lane
                 foreach (Floor floor in floors)
                 {
                     ElementId materialId = floor.Category.Id;
-                    string number = "";
                     List<Solid> solidList = GetSolids(doc, floor); // 儲存所有車道板的Solid
                     List<Face> topFaces = GetTopFaces(solidList); // 取得車道的頂面
                     foreach (Face topFace in topFaces)
                     {
                         try
                         {
-                            Solid crushSolid = CreateCrushSolids(doc, topFace, height, materialId, floor.Id, number); // 使用CreateLoftGeometry擠出車道板頂面Solid
+                            Solid crushSolid = CreateCrushSolids(doc, topFace, height, materialId, floor.Id); // 使用CreateLoftGeometry擠出車道板頂面Solid
+                            //TessellatedShapeBuilderResult crushSolid = CreateCrushFaces(doc, topFace, height, materialId); // 建立Face的封閉曲線(座標點不用重複) <-- Test Failed
                         }
                         catch (Exception ex)
                         {
@@ -183,7 +183,7 @@ namespace Lane
             return topFaces;
         }
         // 使用CreateLoftGeometry擠出車道板頂面Solid
-        private Solid CreateCrushSolids(Document doc, Face topFace, double height, ElementId materialId, ElementId floorId, string number)
+        private Solid CreateCrushSolids(Document doc, Face topFace, double height, ElementId materialId, ElementId floorId)
         {
             CurveLoop buttomCurves = new CurveLoop();
             CurveLoop topCurves = new CurveLoop();
@@ -249,6 +249,98 @@ namespace Lane
             }
 
             return solid;
+        }
+        // 建立Face的封閉曲線(座標點不用重複)
+        private TessellatedShapeBuilderResult CreateCrushFaces(Document doc, Face topFace, double height, ElementId materialId)
+        {
+            IList<XYZ> bottomCurveXYZs = new List<XYZ>(); // 底面座標
+            IList<XYZ> sideCurveXYZs = new List<XYZ>(); // 側面座標
+            IList<XYZ> topCurveXYZs = new List<XYZ>(); // 頂面座標
+            TessellatedShapeBuilder builder = new TessellatedShapeBuilder();
+            builder.OpenConnectedFaceSet(true);
+
+            foreach (EdgeArray edgeArray in topFace.EdgeLoops)
+            {
+                List<Curve> topCurves = new List<Curve>();
+                // 干涉元件底面
+                bottomCurveXYZs.Clear();
+                foreach (Edge edge in edgeArray)
+                {
+                    Curve curve = edge.AsCurveFollowingFace(topFace); topCurves.Add(curve);
+                    int curveTessellateCount = curve.Tessellate().Count;
+                    for (int i = 0; i < curveTessellateCount; i++)
+                    {
+                        XYZ xyz = curve.Tessellate()[i];
+                        // 如果座標重複則不儲存
+                        XYZ sameXYZ = bottomCurveXYZs.Where(x => x.X.Equals(xyz.X) && x.Y.Equals(xyz.Y) && x.Z.Equals(xyz.Z)).FirstOrDefault();
+                        if (sameXYZ == null)
+                        {
+                            bottomCurveXYZs.Add(xyz);
+                        }
+                    }
+                }
+                builder.AddFace(new TessellatedFace(bottomCurveXYZs, materialId));
+
+                // 干涉元件頂面
+                topCurveXYZs.Clear();
+                foreach (Edge edge in edgeArray)
+                {
+                    Curve curve = edge.AsCurveFollowingFace(topFace);
+                    int curveTessellateCount = curve.Tessellate().Count;
+                    for (int i = 0; i < curveTessellateCount; i++)
+                    {
+                        XYZ xyz = new XYZ(curve.Tessellate()[i].X, curve.Tessellate()[i].Y, curve.Tessellate()[i].Z + height);
+                        // 如果座標重複則不儲存
+                        XYZ sameXYZ = topCurveXYZs.Where(x => x.X.Equals(xyz.X) && x.Y.Equals(xyz.Y) && x.Z.Equals(xyz.Z)).FirstOrDefault();
+                        if (sameXYZ == null)
+                        {
+                            topCurveXYZs.Add(xyz);
+                        }
+                    }
+                }
+                builder.AddFace(new TessellatedFace(topCurveXYZs, materialId));
+
+                // 干涉元件側面
+                foreach (Edge edge in edgeArray)
+                {
+                    sideCurveXYZs.Clear();
+                    Curve curve = edge.AsCurveFollowingFace(topFace);
+                    int curveTessellateCount = curve.Tessellate().Count;
+                    foreach (XYZ xyz in curve.Tessellate())
+                    {
+                        sideCurveXYZs.Add(xyz);
+                    }
+                    for (int i = curveTessellateCount - 1; i >= 0; i--)
+                    {
+                        sideCurveXYZs.Add(new XYZ(curve.Tessellate()[i].X, curve.Tessellate()[i].Y, curve.Tessellate()[i].Z + height));
+                    }
+                    //XYZ xyz = curve.Tessellate()[0]; sideCurveXYZs.Add(xyz);
+                    //xyz = curve.Tessellate()[curveTessellateCount - 1]; sideCurveXYZs.Add(xyz);
+                    //xyz = new XYZ(curve.Tessellate()[curveTessellateCount - 1].X, curve.Tessellate()[curveTessellateCount - 1].Y, curve.Tessellate()[curveTessellateCount - 1].Z + height); sideCurveXYZs.Add(xyz);
+                    //xyz = new XYZ(curve.Tessellate()[0].X, curve.Tessellate()[0].Y, curve.Tessellate()[0].Z + height); sideCurveXYZs.Add(xyz);
+                    builder.AddFace(new TessellatedFace(sideCurveXYZs, materialId));
+                }
+            }
+
+            TessellatedShapeBuilderResult result = null;
+            try
+            {
+                builder.CloseConnectedFaceSet();
+                //builder.Target = TessellatedShapeBuilderTarget.Solid;
+                //builder.Fallback = TessellatedShapeBuilderFallback.Abort;
+                //builder.Target = TessellatedShapeBuilderTarget.AnyGeometry;
+                //builder.Fallback = TessellatedShapeBuilderFallback.Mesh;
+                builder.Build();
+                result = builder.GetBuildResult();
+                DirectShape ds = DirectShape.CreateElement(doc, materialId);
+                ds.ApplicationId = "Application id";
+                ds.ApplicationDataId = "Geometry object id";
+                ds.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS).Set("車道板干涉元件");
+                ds.SetShape(result.GetGeometricalObjects());
+            }
+            catch (Exception ex) { string error = ex.Message + "\n" + ex.ToString(); }
+
+            return result;
         }
         // 出衝突報告
         private List<CrushElemInfo> CrushReport(Document doc, LogicalOrFilter logicalOrFilter, List<Floor> floors)
